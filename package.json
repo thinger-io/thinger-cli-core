@@ -1,6 +1,6 @@
 {
     "name": "@thinger-io/cli-core",
-    "version": "0.4.2",
+    "version": "0.5.0",
     "description": "Shared core of the Thinger.io CLIs and their MCP servers: API client, auth, profiles, generic commands and MCP tools",
     "type": "module",
     "exports": {

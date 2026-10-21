@@ -215,7 +215,8 @@ describe('user-level token CRUD', () => {
         assert.equal(post.body.name, 'Backup Notifier');
         assert.deepEqual(post.body.allow, { Device: { '*': ['AccessDeviceResources'] } });
         assert.equal(typeof post.body.expire, 'number');
-        assert.ok(post.body.expire > Math.floor(Date.now() / 1000));
+        // Account tokens expire in unix milliseconds.
+        assert.ok(post.body.expire > Date.now() + 89 * 24 * 3600 * 1000);
         assert.equal(doc.access_token, 'fake-jwt-backup_notifier');
     });
 

@@ -19,7 +19,15 @@ It holds everything that is not specific to a product:
   `profile` (product profiles), `tokens`, `alarms`, `storage`, with every
   account path built in `paths`.
 - **Generic commands** (`cli`, `commands/*`) — login, logout, profile, device,
-  product, bucket, dashboard, mcp.
+  product, bucket, dashboard, mcp; `api` for any request to the server; and,
+  generated from the same catalog the MCP serves, a command per resource
+  type (`<type> list`, `get`, `create`, `update`, `delete`, `clone`,
+  `describe` and its actions; server types under `admin`), run by the
+  handlers and hooks of the `resource_*` tools, so a type added to the
+  catalog reaches the CLI and the MCP at once. Commands over the other tools
+  complete them: `bucket write` and `export`, `storage files`, `upload`,
+  `download` and `rm`, `device send` and `overview`, `product resource` and
+  `apply`, `plugin call`. A command the CLI registers itself keeps its name.
 - **Dashboard apps** (`dashboard`, `dashboard-init`, `dashboard-dev`,
   `dashboard-sdk`) — create an app from a template of
   `@thinger-io/dashboard-sdk`, develop it on its own dev server (a link with

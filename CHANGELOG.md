@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.5.0] - 2026-10-21
+
+### Added
+
+- `api <path>`: any request to the profile's server, as `gh api` does for
+  GitHub. `{user}` stands for the account (`--user` for another), `-X`
+  picks the method (GET, or POST with a body), `--from <file|->` and
+  `-f key=value` (dots nest) build the body, `-q key=value` the query, and
+  `-o <file>` saves the answer (binary answers are only written to a file
+  or a pipe). Only paths of the profile's server: a full URL is refused.
+- Generic resource commands, generated from the MCP catalog:
+  `<type> list|get|create|update|delete|clone|describe|<action>` for its 47
+  types, named in kebab case (`alarm-rule`, `device-property`; child types
+  take their parent's ids first), server types under `admin`
+  (`admin host restart <host>`). They run the handlers of the
+  `resource_*` tools, hooks included (generated device credentials, token
+  expiries such as "30d"). Bodies come from `--from <file|->` and
+  `-s key=value` (JSON values, dots nest); `update --merge` patches,
+  `--projects` sets the projects; `list` takes `--search`, `--filter`,
+  `--count` and `--index` and returns every record unless `--count`; `get`
+  and actions take `-o <file>`; `delete` asks unless `-y`. With `-j` they
+  print `{ ok, data }` with the record, list or answer. Verbs the groups
+  written by hand already have (`device list`, `product create`…) keep
+  theirs.
+- Commands over the MCP tools that are not CRUD: `bucket write` (a JSON
+  sample, an array or NDJSON), `bucket export` (create the export, wait for
+  it, download it, delete it from the server unless `--keep`), `storage
+  files|upload|download|rm` (folders and binary files), `device send`
+  (data of an HTTP device), `device overview`, `product resource`,
+  `product apply` (create or update a product from the JSON of `product
+  export`: record, each profile category, services and product
+  properties) and `plugin call`.
+- MCP tool results carry their structured data for these commands (under
+  a symbol: MCP clients see the same text as before).
+
+### Fixed
+
+- Account tokens created with an expiry as a duration ("30d") through
+  `resource_create` (and `createToken`) got it in seconds: the server takes
+  unix milliseconds and refused it. A timestamp too small to be
+  milliseconds is still read as seconds. Device tokens keep seconds.
+- Ids `.` and `..` are refused (`resource_*` tools too): the URL resolved
+  them to the parent, so deleting the property `..` of a device reached
+  the device.
+- The storage helpers (`storage_file_*` tools, thinr's product scripts)
+  escape each segment of a file path and refuse empty, `.` and `..`
+  segments: `a#b` reached the file `a`, `..` the storage. `plugin_call`
+  also refuses `%2e%2e`.
+
 ## [0.4.2] - 2026-10-17
 
 ### Fixed
