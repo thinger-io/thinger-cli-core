@@ -14,6 +14,7 @@ import {
 import { apiMethod, apiPath, decodeBody, rawApiCall } from '../lib/raw-api.js';
 import { requestFor } from '../lib/mcp/catalog.js';
 import { storageFilePath } from '../lib/storage.js';
+import { describeArguments } from '../lib/commands/arguments.js';
 import { resolveExpiryMs } from '../lib/tokens.js';
 
 const VERBS = ['list', 'get', 'create', 'update', 'delete', 'clone'];
@@ -208,6 +209,19 @@ describe('generic resource commands', () => {
         registerResourceCommands(p);
         assert.equal(find(p, ['endpoint'])?.commands.length, 0);
         assert.equal(find(p, ['admin'])?.commands.length, 0);
+    });
+
+    it('describe every argument, generated or written by hand', () => {
+        const p = new Command().name('acme');
+        p.command('device').command('info <deviceId>');
+        registerResourceCommands(p);
+        describeArguments(p);
+        assert.equal(find(p, ['device', 'info'])?.registeredArguments[0].description, 'Device ID');
+        const args = find(p, ['device-property', 'get'])?.registeredArguments;
+        assert.deepEqual(
+            args?.map((a) => a.description),
+            ['ID of the device', 'ID of the device property'],
+        );
     });
 
     it('describe commands without the sentences meant for agents', () => {

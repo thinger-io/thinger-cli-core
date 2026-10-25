@@ -34,6 +34,9 @@
   properties) and `plugin call`.
 - MCP tool results carry their structured data for these commands (under
   a symbol: MCP clients see the same text as before).
+- Every positional argument has a description in the help (`<deviceId>`:
+  Device ID; generated commands: "ID of the alarm rule"…). A CLI's own
+  commands keep theirs.
 
 ### Fixed
 
@@ -48,6 +51,8 @@
   escape each segment of a file path and refuse empty, `.` and `..`
   segments: `a#b` reached the file `a`, `..` the storage. `plugin_call`
   also refuses `%2e%2e`.
+- The help of `bucket read` and `device resource` printed some defaults
+  twice ("(default: 10) (default: 10)", "(default: {})").
 
 ## [0.4.2] - 2026-10-17
 
