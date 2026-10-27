@@ -2,41 +2,94 @@
 
 ## [0.5.0] - 2026-10-21
 
+One grammar for every command, noun first:
+`<cli> <noun> [<noun>…] <verb> [<parent ids>…] [<id>] [options]`. Nouns
+nest under their parent (`device property`, `product profile api`), verbs
+come from a closed set, ids are positional and named after their noun,
+and the options keep one meaning everywhere. Some commands of 0.4 change
+form (see the table below); the old forms are gone, not aliased.
+
 ### Added
 
 - `api <path>`: any request to the profile's server, as `gh api` does for
   GitHub. `{user}` stands for the account (`--user` for another), `-X`
   picks the method (GET, or POST with a body), `--from <file|->` and
-  `-f key=value` (dots nest) build the body, `-q key=value` the query, and
+  `-s key=value` (dots nest) build the body, `-q key=value` the query, and
   `-o <file>` saves the answer (binary answers are only written to a file
   or a pipe). Only paths of the profile's server: a full URL is refused.
-- Generic resource commands, generated from the MCP catalog:
-  `<type> list|get|create|update|delete|clone|describe|<action>` for its 47
-  types, named in kebab case (`alarm-rule`, `device-property`; child types
-  take their parent's ids first), server types under `admin`
-  (`admin host restart <host>`). They run the handlers of the
+- Commands for every resource type, generated from the MCP catalog:
+  `list|get|create|update|delete|clone|describe` and the type's actions,
+  for its 47 types. A child type nests under its parent's command and takes
+  its ids first (`device bucket tag get <device> <bucket> <tag>`); the
+  product profile categories go under `product profile` (`api`, `bucket`,
+  `property`, `autoprovision`, `flow`, `code`); server types go under
+  `admin` (`admin host restart <host>`). They run the handlers of the
   `resource_*` tools, hooks included (generated device credentials, token
   expiries such as "30d"). Bodies come from `--from <file|->` and
-  `-s key=value` (JSON values, dots nest); `update --merge` patches,
-  `--projects` sets the projects; `list` takes `--search`, `--filter`,
-  `--count` and `--index` and returns every record unless `--count`; `get`
-  and actions take `-o <file>`; `delete` asks unless `-y`. With `-j` they
-  print `{ ok, data }` with the record, list or answer. Verbs the groups
-  written by hand already have (`device list`, `product create`…) keep
-  theirs.
+  `-s key=value` (JSON values, dots nest); create, update and clone take
+  `-n/--name` and `-d/--description` on the types that have them, `update
+  --merge` patches, `--projects` sets the projects; `list` takes
+  `--search`, `--filter`, `--count` and `--index` and returns every record
+  unless `--count`; `get` takes `-f <dot.path>` (one field) and
+  `-o <file>`; actions take `-f`, `-o` and `-q`; `delete` and
+  `replace-all` ask unless `-y`. With `-j` they print `{ ok, data }`.
+- `set <parents…> <property> <value>` on every property type (device,
+  product, plugin, asset type, asset group, project and account
+  properties): the value, parsed as JSON, created when missing.
 - Commands over the MCP tools that are not CRUD: `bucket write` (a JSON
   sample, an array or NDJSON), `bucket export` (create the export, wait for
   it, download it, delete it from the server unless `--keep`), `storage
-  files|upload|download|rm` (folders and binary files), `device send`
-  (data of an HTTP device), `device overview`, `product resource`,
-  `product apply` (create or update a product from the JSON of `product
-  export`: record, each profile category, services and product
-  properties) and `plugin call`.
+  file list|upload|download|delete` (folders and binary files), `device
+  send` (data of an HTTP device), `device overview`, `device resource
+  list|call`, `product profile api call` (a product API resource for the
+  whole product), `product apply --from <file|->` (create or update a
+  product from the JSON of `product export`: record, each profile
+  category, services and product properties) and `plugin call`.
+- `device list`, `product list` and `bucket list` take the list options
+  too, keeping their tables; `device create` and `product create` take
+  `--from`, `-s` and `--projects`, and their id may come from the body
+  (when the record is created but its projects cannot be set, the error
+  says so).
+- `buildProgram(opts)`: the command tree `runCli` runs, for tests; and
+  `checkGrammar(program, { exceptions })` (`commands/grammar`), which checks
+  a tree against the grammar (names, verbs, positionals, options, help
+  groups, the catalog's commands) for the tests of every CLI.
+- `runCli({ argumentHelp })`: help of the positional arguments of the CLI's
+  own commands. Every positional argument has a description in the help.
+- The help groups commands the same way at every level: Resources,
+  Administration, Configuration, Integration and Operations at the root;
+  Records, Data, Actions and Subresources inside a noun.
 - MCP tool results carry their structured data for these commands (under
   a symbol: MCP clients see the same text as before).
-- Every positional argument has a description in the help (`<deviceId>`:
-  Device ID; generated commands: "ID of the alarm rule"…). A CLI's own
-  commands keep theirs.
+
+### Changed (breaking)
+
+| 0.4                                          | 0.5                                                          |
+| -------------------------------------------- | ------------------------------------------------------------ |
+| `device list <pattern>`                      | `device list --search <text>` (or `--filter name=<regex>`)   |
+| `device info <device>`                       | `device get <device>`                                        |
+| `device property <device>`                   | `device property list <device>`                              |
+| `device property <device> <property> [-f p]` | `device property get <device> <property> [-f p]`             |
+| `device property-set <device> <prop> <json>` | `device property set <device> <property> <json>`             |
+| `device resource <device>`                   | `device resource list <device>`                              |
+| `device resource <device> <res> -i k=v`      | `device resource call <device> <resource> -s k=v` (`--from`) |
+| `product info <product>`                     | `product get <product>`                                      |
+| `product property-list <product>`            | `product property list <product>`                            |
+| `product property-get <product> <prop>`      | `product property get <product> <property>`                  |
+| `product property-set <product> <prop> <v>`  | `product property set <product> <property> <value>`          |
+| `product property-delete <product> <prop>`   | `product property delete <product> <property> -y`            |
+
+- The outputs change with the commands: `device get` and `product get`
+  print the record as JSON (as `info` did); `device property get` and
+  `product property get` print the property record, with its value under
+  `value`, so `-f` paths start there (`-f value.setpoint` where 0.4 took
+  `-f setpoint`); `device property list` and
+  `product property list` print the property records (with `-j`, the
+  records instead of `{ product, properties: [names] }`); `product property
+  delete` asks unless `-y`. `device resource call` has no `-i/--input`: its
+  input comes from `--from` and `-s`, like every command that sends data.
+- `register(program, groups)`'s groups are Resources at the root (they were
+  Operations), and `registerToolCommands(program)` no longer takes them.
 
 ### Fixed
 

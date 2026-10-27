@@ -20,14 +20,15 @@ It holds everything that is not specific to a product:
   account path built in `paths`.
 - **Generic commands** (`cli`, `commands/*`) — login, logout, profile, device,
   product, bucket, dashboard, mcp; `api` for any request to the server; and,
-  generated from the same catalog the MCP serves, a command per resource
-  type (`<type> list`, `get`, `create`, `update`, `delete`, `clone`,
-  `describe` and its actions; server types under `admin`), run by the
-  handlers and hooks of the `resource_*` tools, so a type added to the
-  catalog reaches the CLI and the MCP at once. Commands over the other tools
-  complete them: `bucket write` and `export`, `storage files`, `upload`,
-  `download` and `rm`, `device send` and `overview`, `product resource` and
-  `apply`, `plugin call`. A command the CLI registers itself keeps its name.
+  generated from the same catalog the MCP serves, the commands of every
+  resource type (`list`, `get`, `create`, `update`, `delete`, `clone`,
+  `describe`, `set` on properties, and its actions), run by the handlers and
+  hooks of the `resource_*` tools, so a type added to the catalog reaches the
+  CLI and the MCP at once. Commands over the other tools complete them:
+  `bucket write` and `export`, `storage file list|upload|download|delete`,
+  `device send`, `overview` and `resource list|call`, `product apply`,
+  `product profile api call`, `plugin call`. A command the CLI registers
+  itself keeps its name. They all follow one grammar (below).
 - **Dashboard apps** (`dashboard`, `dashboard-init`, `dashboard-dev`,
   `dashboard-sdk`) — create an app from a template of
   `@thinger-io/dashboard-sdk`, develop it on its own dev server (a link with
@@ -104,6 +105,42 @@ afterDelete } }`), run after the core's: see `mcp/resource-hooks.js`.
   `resource_call` like the server's. A type or action that clashes with the
   catalog fails at startup.
 - `mcpInstructions` — server-level guidance sent to MCP clients.
+- `argumentHelp` — `{ byCommand, byName }`: help of the positional
+  arguments of the CLI's own commands (`{ 'device logs': { unit: '…' } }`).
+
+`buildProgram(opts)` builds the same command tree without running it, for
+tests.
+
+## Command grammar
+
+Every CLI on the core reads the same way:
+
+```
+<cli> <noun> [<noun>…] <verb> [<parent ids>…] [<id>] [<extra>] [options]
+```
+
+- **Nouns** are singular, kebab case, nested under their parent:
+  `device property`, `device bucket tag`, `product profile api`, at most
+  three deep; server types go under `admin`. Groups run nothing themselves.
+- **Verbs** form a closed set: for records, `list`, `get`, `create`,
+  `update`, `delete`, `clone`, `describe` and `set` (the value of a
+  property); for data, `read`, `write`, `send`, `export`, `import`,
+  `overview`, `call`, `upload` and `download`; the catalog's actions in
+  kebab case (`test-source`, `replace-all`); and the local `init`, `dev`,
+  `publish`, `login`, `logout`, `use`, `current` and `add`.
+- **Positionals** are ids, outermost parent first, named after their noun:
+  `device property get <device> <property>`.
+- **Options** keep one meaning: `-j --json`, `-o --output`, `-y --yes`,
+  `-s --set`, `-q --query`, `-X --method`, `-f --field`; `-n` and `-d` are
+  name and description on create and update. Bodies come from
+  `--from <file|->` and `-s key=value`; lists take `--search`, `--filter`,
+  `--count` and `--index`; deletes ask unless `-y`.
+
+`checkGrammar(program, { exceptions })` (`commands/grammar`) checks a whole
+tree and returns what breaks it; each CLI's tests run it over its
+`buildProgram`, stating what it adds (`root`, `verbs`), its short options
+with another meaning (`shorts`) and the rules a command does not follow
+(`skip`).
 
 ## MCP tools
 

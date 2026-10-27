@@ -7,6 +7,7 @@ import api from '../lib/api.js';
 import { CATALOG } from '../lib/mcp/catalog.js';
 import { setJsonMode } from '../lib/output.js';
 import {
+    actionName,
     cliDescription,
     commandPath,
     registerResourceCommands,
@@ -85,7 +86,10 @@ describe('generic resource commands', () => {
             }
             assert.ok(names.includes('describe'), `${type} lacks describe`);
             for (const action of Object.keys(spec.actions || {})) {
-                assert.ok(names.includes(action.replaceAll('_', '-')), `${type} lacks ${action}`);
+                assert.ok(names.includes(actionName(type, action)), `${type} lacks ${action}`);
+            }
+            if (spec.id === 'property' && 'update' in spec.ops) {
+                assert.ok(names.includes('set'), `${type} lacks set`);
             }
         }
     });
@@ -104,7 +108,8 @@ describe('generic resource commands', () => {
 
     it('send updates with --set fields, nested by dots', async () => {
         const { calls } = await run([
-            'device-property',
+            'device',
+            'property',
             'update',
             'boiler',
             'setpoint',
@@ -121,7 +126,7 @@ describe('generic resource commands', () => {
     });
 
     it('take parents and ids as arguments, and clone under a new id', async () => {
-        const tag = await run(['device-bucket-tag', 'get', 'd1', 'b1', 't1']);
+        const tag = await run(['device', 'bucket', 'tag', 'get', 'd1', 'b1', 't1']);
         assert.match(tag.calls[0].url, /\/devices\/d1\/buckets\/b1\/tags\/t1$/);
         const clone = await run(['endpoint', 'clone', 'e1', 'e2', '-s', 'name=Copy']);
         assert.equal(clone.calls[0].method, 'post');
@@ -190,6 +195,136 @@ describe('generic resource commands', () => {
         assert.equal(code, 1);
     });
 
+    it('set the value of a property, and create it when the server has none', async () => {
+        const set = await run(['device', 'property', 'set', 'boiler', 'setpoint', '21', '-j']);
+        assert.equal(set.calls.length, 1);
+        assert.equal(set.calls[0].method, 'put');
+        assert.match(set.calls[0].url, /\/devices\/boiler\/properties\/setpoint$/);
+        assert.deepEqual(JSON.parse(set.calls[0].data), { value: 21 });
+        assert.deepEqual(JSON.parse(set.out).data, {
+            parent: 'boiler',
+            id: 'setpoint',
+            value: 21,
+        });
+
+        // The account's properties: a 404 on the update creates it.
+        const calls = [];
+        const saved = api.defaults.adapter;
+        const log = console.log;
+        api.defaults.adapter = async (config) => {
+            calls.push(config);
+            if (config.method === 'put') {
+                const response = { status: 404, data: {}, headers: {}, config };
+                throw Object.assign(new Error('404'), { response, config, isAxiosError: true });
+            }
+            return { data: {}, status: 200, statusText: 'OK', headers: {}, config };
+        };
+        console.log = () => {};
+        try {
+            await program().parseAsync(['node', 'acme', 'property', 'set', 'mode', '"eco"']);
+        } finally {
+            api.defaults.adapter = saved;
+            console.log = log;
+        }
+        assert.deepEqual(
+            calls.map((c) => c.method),
+            ['put', 'post'],
+        );
+        assert.deepEqual(JSON.parse(calls[1].data), { property: 'mode', value: 'eco' });
+    });
+
+    it('print one field of a record with -f', async () => {
+        const record = { endpoint: 'e1', config: { url: 'https://x', headers: { a: 1 } } };
+        const text = await run(['endpoint', 'get', 'e1', '-f', 'config.url'], record);
+        assert.equal(text.out, 'https://x');
+        const obj = await run(['endpoint', 'get', 'e1', '-f', 'config.headers', '-j'], record);
+        assert.deepEqual(JSON.parse(obj.out).data, { a: 1 });
+    });
+
+    it('take -n and -d over --set on create and update', async () => {
+        const created = await run([
+            'endpoint',
+            'create',
+            'e1',
+            '-s',
+            'name=From set',
+            '-n',
+            'Notify',
+            '-d',
+            'Sends a mail',
+        ]);
+        assert.deepEqual(JSON.parse(created.calls[0].data), {
+            endpoint: 'e1',
+            name: 'Notify',
+            description: 'Sends a mail',
+        });
+        const updated = await run(['bucket', 'update', 'temps', '-n', 'Temperatures']);
+        assert.equal(updated.calls[0].method, 'put');
+        assert.deepEqual(JSON.parse(updated.calls[0].data), { name: 'Temperatures' });
+        const p = program();
+        const options = (path) =>
+            find(p, path)?.options.map((o) => o.long) ?? assert.fail(path.join(' '));
+        assert.ok(!options(['role', 'create']).includes('--name'));
+        assert.ok(options(['product', 'profile', 'bucket', 'create']).includes('--name'));
+    });
+
+    it('name ids after their noun and put the profile under product profile', () => {
+        const p = program();
+        const usage = (path) => find(p, path)?.usage();
+        assert.equal(usage(['asset-type', 'get']), '[options] <asset-type>');
+        assert.equal(usage(['admin', 'oauth-client', 'get']), '[options] <oauth-client>');
+        assert.equal(usage(['product', 'profile', 'api', 'get']), '[options] <product> <api>');
+        assert.equal(usage(['bucket', 'export-file', 'delete']), '[options] <bucket> <file>');
+        assert.equal(usage(['alarm-rule', 'test']), '[options] <alarm-rule>');
+        assert.equal(usage(['admin', 'host', 'get-settings']), '[options] <host>');
+        assert.equal(usage(['plugin', 'uninstall']), '[options] <plugin>');
+        assert.equal(usage(['sync', 'lock', 'list']), '[options] <sync>');
+        assert.ok(find(p, ['product', 'profile', 'code', 'update']));
+    });
+
+    it('ask before replacing a whole profile category', async () => {
+        const exit = process.exit;
+        const write = process.stdout.write;
+        const err = process.stderr.write;
+        let code;
+        // @ts-ignore -- printErr exits: record it instead
+        process.exit = (c) => {
+            code = c;
+            throw new Error('exit');
+        };
+        // @ts-ignore
+        process.stderr.write = () => true;
+        try {
+            const { calls } = await run([
+                'product',
+                'profile',
+                'bucket',
+                'replace-all',
+                'meter',
+                '-s',
+                'b1.enabled=true',
+            ]).catch(() => ({ calls: [] }));
+            assert.equal(calls.length, 0);
+        } finally {
+            process.exit = exit;
+            process.stdout.write = write;
+            process.stderr.write = err;
+        }
+        assert.equal(code, 1);
+        const { calls } = await run([
+            'product',
+            'profile',
+            'bucket',
+            'replace-all',
+            'meter',
+            '-s',
+            'b1.enabled=true',
+            '-y',
+        ]);
+        assert.equal(calls[0].method, 'put');
+        assert.match(calls[0].url, /\/products\/meter\/profile\/buckets$/);
+    });
+
     it('treat aliases of hand-written commands as taken', () => {
         const p = new Command().name('acme');
         p.command('device').command('read').alias('get').description('hand-written');
@@ -213,11 +348,14 @@ describe('generic resource commands', () => {
 
     it('describe every argument, generated or written by hand', () => {
         const p = new Command().name('acme');
-        p.command('device').command('info <deviceId>');
+        p.command('device').command('status <device> <unit>');
         registerResourceCommands(p);
-        describeArguments(p);
-        assert.equal(find(p, ['device', 'info'])?.registeredArguments[0].description, 'Device ID');
-        const args = find(p, ['device-property', 'get'])?.registeredArguments;
+        describeArguments(p, { byCommand: { 'device status': { unit: 'Systemd unit' } } });
+        assert.deepEqual(
+            find(p, ['device', 'status'])?.registeredArguments.map((a) => a.description),
+            ['Device ID', 'Systemd unit'],
+        );
+        const args = find(p, ['device', 'property', 'get'])?.registeredArguments;
         assert.deepEqual(
             args?.map((a) => a.description),
             ['ID of the device', 'ID of the device property'],

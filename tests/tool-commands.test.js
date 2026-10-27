@@ -11,6 +11,7 @@ import { applyProduct } from '../lib/product-apply.js';
 import { exportBucket } from '../lib/bucket-export.js';
 import { setJsonMode } from '../lib/output.js';
 import { registerToolCommands } from '../lib/commands/tools.js';
+import { registerApiCommand } from '../lib/commands/api.js';
 
 const jwt = `x.${Buffer.from(JSON.stringify({ usr: 'acme' })).toString('base64url')}.y`;
 
@@ -154,14 +155,31 @@ describe('bucket export', () => {
 describe('tool commands', () => {
     function program() {
         const p = new Command().name('acme').option('-u, --user <username>').exitOverride();
-        const groups = {
-            device: p.command('device'),
-            product: p.command('product'),
-            bucket: p.command('bucket'),
-        };
-        groups.product.command('apply').description('the CLI’s own');
-        registerToolCommands(p, groups);
+        // Groups written by hand (with commands: an empty one is a CLI's leaf).
+        p.command('device').command('list');
+        p.command('bucket').command('list');
+        p.command('product').command('apply').description('the CLI’s own');
+        registerToolCommands(p);
+        registerApiCommand(p);
         return p;
+    }
+
+    /** Run a command line against `route`, quiet; returns the requests and stdout. */
+    async function run(argv, route = () => ({})) {
+        const out = [];
+        const saved = { log: console.log, write: process.stdout.write };
+        console.log = (...a) => out.push(a.join(' '));
+        // @ts-ignore -- captured for the test
+        process.stdout.write = (chunk) => out.push(String(chunk)) || true;
+        let calls;
+        try {
+            calls = await withServer(route, () => program().parseAsync(['node', 'acme', ...argv]));
+        } finally {
+            console.log = saved.log;
+            process.stdout.write = saved.write;
+            setJsonMode(false);
+        }
+        return { calls, out: out.join('\n') };
     }
 
     it('leave the commands a CLI has of the same name', () => {
@@ -170,42 +188,140 @@ describe('tool commands', () => {
         const apply = product?.commands.filter((c) => c.name() === 'apply');
         assert.equal(apply?.length, 1);
         assert.equal(apply?.[0].description(), 'the CLI’s own');
-        assert.ok(product?.commands.some((c) => c.name() === 'resource'));
-        const storage = p.commands.find((c) => c.name() === 'storage');
-        assert.deepEqual(
-            storage?.commands.map((c) => c.name()),
-            ['files', 'upload', 'download', 'rm'],
-        );
+        const names = (cmd) => cmd?.commands.map((c) => c.name());
+        const find = (...path) =>
+            path.reduce((cmd, n) => cmd?.commands.find((c) => c.name() === n), p);
+        assert.deepEqual(names(find('product', 'profile', 'api')), ['call']);
+        assert.deepEqual(names(find('device', 'resource')), ['list', 'call']);
+        assert.deepEqual(names(find('storage', 'file')), ['list', 'upload', 'download', 'delete']);
     });
 
     it('write NDJSON samples to a bucket', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-core-ndjson-'));
         const file = path.join(dir, 's.ndjson');
         fs.writeFileSync(file, '{"ts":1,"t":20}\n{"ts":2,"t":21}\n');
+        const { calls } = await run(['bucket', 'write', 'temps', '--from', file]);
+        assert.equal(calls[0].url, '/v1/users/acme/buckets/temps/data');
+        assert.deepEqual(calls[0].data, [
+            { ts: 1, t: 20 },
+            { ts: 2, t: 21 },
+        ]);
+    });
+
+    it('call a device resource with -s as its input, and read one field', async () => {
+        const call = await run(
+            ['device', 'resource', 'call', 'd1', 'led', '-s', 'on=true', '-f', 'state'],
+            () => ({ state: 'on', since: 1 }),
+        );
+        assert.equal(call.calls[0].method, 'post');
+        assert.equal(call.calls[0].url, '/v3/users/acme/devices/d1/resources/led');
+        assert.deepEqual(call.calls[0].data, { on: true });
+        assert.equal(call.out, 'on');
+        // Without input, it reads the resource.
+        const read = await run(['device', 'resource', 'call', 'd1', 'temp', '-j'], () => ({
+            celsius: 21.5,
+        }));
+        assert.equal(read.calls[0].method, 'get');
+        assert.deepEqual(JSON.parse(read.out), { ok: true, data: { celsius: 21.5 } });
+    });
+
+    it('list the resources of a device as data with --json', async () => {
+        const { out } = await run(['device', 'resource', 'list', 'd1', '-j'], (method, url) =>
+            url.endsWith('/resources/api') ? { temp: { fn: 3 } } : { out: 0 },
+        );
+        assert.deepEqual(JSON.parse(out).data, [{ name: 'temp', fn: 3, out: 0 }]);
+    });
+
+    it('call a product API resource for the whole product', async () => {
+        const { calls } = await run([
+            'product',
+            'profile',
+            'api',
+            'call',
+            'meter',
+            'ingest',
+            '-s',
+            'temp=20',
+        ]);
+        assert.equal(calls[0].url, '/v1/users/acme/products/meter/resources/ingest');
+        assert.deepEqual(calls[0].data, { temp: 20 });
+    });
+
+    it('send a body built with -s from api', async () => {
+        const { calls } = await run([
+            'api',
+            '/v1/users/{user}/buckets',
+            '-s',
+            'bucket=temps',
+            '-s',
+            'config.source=write',
+        ]);
+        assert.equal(calls[0].method, 'post');
+        assert.equal(calls[0].url, '/v1/users/acme/buckets');
+        assert.deepEqual(calls[0].data, {
+            bucket: 'temps',
+            config: { source: 'write' },
+        });
+    });
+
+    it('list, delete and download storage files', async () => {
+        const list = await run(['storage', 'file', 'list', 'web', 'assets', '-j'], () => [
+            { path: 'assets/a.js' },
+        ]);
+        assert.equal(list.calls[0].url, '/v1/users/acme/storages/web/files');
+        assert.deepEqual(JSON.parse(list.out).data, [{ path: 'assets/a.js' }]);
+        const del = await run(['storage', 'file', 'delete', 'web', 'a b.txt', '-y', '-j']);
+        assert.equal(del.calls[0].method, 'delete');
+        assert.match(del.calls[0].url, /\/storages\/web\/files\/a%20b\.txt$/);
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-core-dl-'));
+        const file = path.join(dir, 'index.html');
+        await run(['storage', 'file', 'download', 'web', 'index.html', '-o', file], () => '<p>');
+        assert.equal(fs.readFileSync(file, 'utf8'), '<p>');
+    });
+});
+
+describe('product apply --from', () => {
+    it('reads the product from --from, with -s over it', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-core-apply-'));
+        const file = path.join(dir, 'meter.json');
+        fs.writeFileSync(file, JSON.stringify({ product: 'meter', name: 'Meter' }));
+        const p = new Command().name('acme').option('-u, --user <username>').exitOverride();
+        registerToolCommands(p);
         const log = console.log;
         console.log = () => {};
+        let calls;
         try {
-            const calls = await withServer(
-                () => ({}),
+            calls = await withServer(
+                (method) => (method === 'get' ? 404 : {}),
                 () =>
-                    program().parseAsync([
+                    p.parseAsync([
                         'node',
                         'acme',
-                        'bucket',
-                        'write',
-                        'temps',
+                        'product',
+                        'apply',
                         '--from',
                         file,
+                        '-s',
+                        'name=Meter 2',
                     ]),
             );
-            assert.equal(calls[0].url, '/v1/users/acme/buckets/temps/data');
-            assert.deepEqual(calls[0].data, [
-                { ts: 1, t: 20 },
-                { ts: 2, t: 21 },
-            ]);
         } finally {
             console.log = log;
-            setJsonMode(false);
+        }
+        const post = calls.find((c) => c.method === 'post');
+        assert.equal(post?.data.product, 'meter');
+        assert.equal(post?.data.name, 'Meter 2');
+        // The file is no argument any more.
+        const err = process.stderr.write;
+        // @ts-ignore -- commander's error line
+        process.stderr.write = () => true;
+        try {
+            await assert.rejects(
+                p.parseAsync(['node', 'acme', 'product', 'apply', 'meter.json']),
+                /too many arguments/,
+            );
+        } finally {
+            process.stderr.write = err;
         }
     });
 });
