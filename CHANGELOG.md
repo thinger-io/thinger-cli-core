@@ -31,8 +31,13 @@ form (see the table below); the old forms are gone, not aliased.
   --merge` patches, `--projects` sets the projects; `list` takes
   `--search`, `--filter`, `--count` and `--index` and returns every record
   unless `--count`; `get` takes `-f <dot.path>` (one field) and
-  `-o <file>`; actions take `-f`, `-o` and `-q`; `delete` and
-  `replace-all` ask unless `-y`. With `-j` they print `{ ok, data }`.
+  `-o <file>`; actions take `-f`, `-o` and `-q`; `delete`,
+  `replace-all`, `plugin uninstall` and `admin host restart` ask unless
+  `-y`. With `-j` they print `{ ok, data }`. What they print speaks of
+  commands, not tools: types by their command (`device property`, not
+  `device_property`), `--index` for the next page, and `describe` lists
+  the type's commands and actions where the MCP lists the tools that run
+  them.
 - `set <parents…> <property> <value>` on every property type (device,
   product, plugin, asset type, asset group, project and account
   properties): the value, parsed as JSON, created when missing.

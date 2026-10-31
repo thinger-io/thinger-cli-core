@@ -9,6 +9,7 @@ import { setJsonMode } from '../lib/output.js';
 import {
     actionName,
     cliDescription,
+    cliWording,
     commandPath,
     registerResourceCommands,
 } from '../lib/commands/resources.js';
@@ -362,12 +363,20 @@ describe('generic resource commands', () => {
         );
     });
 
-    it('describe commands without the sentences meant for agents', () => {
+    it('describe commands with the commands instead of the tools', () => {
         assert.equal(
             cliDescription(
                 'Data buckets (time series). Data is read with {tool:bucket_data_read}.',
             ),
-            'Data buckets (time series)',
+            'Data buckets (time series). Data is read with `acme bucket read`',
+        );
+        assert.equal(
+            cliDescription('Devices. Their sessions are listed with {tool:sessions}.'),
+            'Devices',
+        );
+        assert.equal(
+            cliWording('Created device_property boiler/x; pass index: 50 for more'),
+            'Created device_property boiler/x; pass --index 50 for more',
         );
         assert.equal(
             cliDescription(
