@@ -9,8 +9,46 @@ come from a closed set, ids are positional and named after their noun,
 and the options keep one meaning everywhere. Some commands of 0.4 change
 form (see the table below); the old forms are gone, not aliased.
 
+The MCP serves eight tools, `resource_describe|list|get|create|update|
+delete|clone|call`, instead of 25: what had a tool of its own (bucket data,
+storage files, device resources, the guides, the profiles, dashboard apps,
+plugin and product API calls) is a type or an action of them, and every
+record is addressed with `ids`, one key per level named as the server's
+REST path names it. The old tool names and the `parent`/`id` arguments are
+gone, not aliased (see the second table below).
+
 ### Added
 
+- MCP: eight tools for everything. Each takes a `type` and `ids`
+  (`{"device": "d1", "bucket": "b1"}`); the keys are the server's REST
+  placeholders (`type` for an asset type, `group` for an asset group,
+  `rule` and `instance` for alarms, `resource` for every product profile
+  category), so a body's id field and its `ids` key share a name and
+  `create` and `clone` need no mapping. Records answered by `list`, `get`
+  and `create` carry their `ids`, ready to pass back. A call with an
+  unknown argument is refused listing the ones the tool takes, and points
+  a misplaced key to `ids`, `filter` or `body`.
+- The core's types and actions, served by the same tools: `bucket_data`
+  (list reads, create writes), `storage_file` (`ids.file` is the path;
+  `body.local` uploads files and folders of this machine), `device_resource`
+  (list, and its `call` action), `doc` (the guides), `profile`; actions
+  `device.send`, `device.overview`, `product_profile_api.call`,
+  `plugin.call` and `dashboard.init|dev|publish`. A CLI adds its own the
+  same way (`resourceTypes`, `resourceActions`).
+- `resource_describe`: without a type, the catalog with each type's ids and
+  ready-to-send examples; with one, its ids, actions, the permission each
+  verb needs, its schemas and examples (the tests check every example
+  against the tools). A `describe` resource hook adds to it.
+- Actions that change a lot at once answer a plan and run with
+  `confirm: true`: `replace_all` of the product profile categories (a diff
+  of what it adds, changes and removes), a host's `update_settings` (a diff
+  of the settings) and `restart`, `plugin.remove|kill`, alarm rules'
+  `test_notification`, and `dashboard.publish` with `prune`. MCP clients
+  that support elicitation are asked instead. The CLI asks unless `-y`.
+- `mcp --read-only` (or `<PREFIX>_MCP_READ_ONLY=1`): only describe, list,
+  get and the read-only actions are served.
+- Tool annotations (read-only, destructive, idempotent) on the eight tools.
+- `doc list` and `doc get <doc>`: the guides from the command line.
 - `api <path>`: any request to the profile's server, as `gh api` does for
   GitHub. `{user}` stands for the account (`--user` for another), `-X`
   picks the method (GET, or POST with a body), `--from <file|->` and
@@ -99,7 +137,39 @@ form (see the table below); the old forms are gone, not aliased.
   delete` asks unless `-y`. `device resource call` has no `-i/--input`: its
   input comes from `--from` and `-s`, like every command that sends data.
 - `register(program, groups)`'s groups are Resources at the root (they were
-  Operations), and `registerToolCommands(program)` no longer takes them.
+  Operations), and `registerToolCommands(program)` is now
+  `registerDataCommands(program)` (`commands/data`) and no longer takes
+  them.
+- The MCP tools (the CLI commands keep their forms and `-j` outputs; only
+  the help of some positionals is renamed: `asset type get <type>`,
+  `asset group get <group>`, `alarm rule get <rule>`, `alarm instance get
+  <instance>`, `product profile <category> get <product> <resource>`):
+
+| 0.4 tool                                 | 0.5 call                                                                       |
+| ---------------------------------------- | ------------------------------------------------------------------------------ |
+| `resource_* parent "d1" id "b1"`          | `resource_* ids {"device": "d1", "bucket": "b1"}`                              |
+| `bucket_data_read bucket`                | `resource_list type "bucket_data" ids {bucket}` (`filter` for the query)       |
+| `bucket_data_write bucket data`          | `resource_create type "bucket_data" ids {bucket} body <sample or samples>`     |
+| `storage_file_list storage path`         | `resource_list type "storage_file" ids {storage} filter {path}`                |
+| `storage_file_read storage path`         | `resource_get type "storage_file" ids {storage, file}`                         |
+| `storage_file_write storage path …`      | `resource_create type "storage_file" ids {storage, file} body {content\|local}` |
+| `storage_file_delete storage path`       | `resource_delete type "storage_file" ids {storage, file}`                      |
+| `device_resource_list device`            | `resource_list type "device_resource" ids {device}`                            |
+| `device_resource_call device resource`   | `resource_call type "device_resource" action "call" ids {device, resource}`    |
+| `device_data_send device data`           | `resource_call type "device" action "send" ids {device} body <data>`           |
+| `device_overview`                        | `resource_call type "device" action "overview"`                                |
+| `product_resource_call product resource` | `resource_call type "product_profile_api" action "call" ids {product, resource}` |
+| `plugin_call plugin path`                | `resource_call type "plugin" action "call" ids {plugin} body {path, method}`   |
+| `doc_read id`                            | `resource_get type "doc" ids {doc}` (`resource_list type "doc"` lists them)    |
+| `profile_list`                           | `resource_list type "profile"`                                                 |
+| `dashboard_init` / `_dev` / `_publish`   | `resource_call type "dashboard" action "init"` / `"dev"` / `"publish"`         |
+
+- `runCli({ mcpTools })` is gone, with `mcp/registry`'s `genericTools` and
+  `mcpTools`: a CLI adds types and actions (`resourceTypes`,
+  `resourceActions`) instead of tools, and `buildTools(opts)` builds the
+  eight. Texts refer to operations as `{op:<type>.<verb|action>}`.
+- `lib/mcp/tools-*.js` moved to `lib/mcp/types/` (as types and actions) and
+  `lib/commands/tools.js` to `lib/commands/data.js`.
 
 ### Fixed
 
@@ -110,10 +180,10 @@ form (see the table below); the old forms are gone, not aliased.
 - Ids `.` and `..` are refused (`resource_*` tools too): the URL resolved
   them to the parent, so deleting the property `..` of a device reached
   the device.
-- The storage helpers (`storage_file_*` tools, thinr's product scripts)
+- The storage helpers (storage files, thinr's product scripts)
   escape each segment of a file path and refuse empty, `.` and `..`
-  segments: `a#b` reached the file `a`, `..` the storage. `plugin_call`
-  also refuses `%2e%2e`.
+  segments: `a#b` reached the file `a`, `..` the storage. The plugin
+  `call` action also refuses `%2e%2e`.
 - The help of `bucket read` and `device resource` printed some defaults
   twice ("(default: 10) (default: 10)", "(default: {})").
 

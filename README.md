@@ -24,11 +24,11 @@ It holds everything that is not specific to a product:
   resource type (`list`, `get`, `create`, `update`, `delete`, `clone`,
   `describe`, `set` on properties, and its actions), run by the handlers and
   hooks of the `resource_*` tools, so a type added to the catalog reaches the
-  CLI and the MCP at once. Commands over the other tools complete them:
+  CLI and the MCP at once. Commands over the data and files complete them:
   `bucket write` and `export`, `storage file list|upload|download|delete`,
   `device send`, `overview` and `resource list|call`, `product apply`,
-  `product profile api call`, `plugin call`. A command the CLI registers
-  itself keeps its name. They all follow one grammar (below).
+  `product profile api call`, `plugin call`, `doc list|get`. A command the
+  CLI registers itself keeps its name. They all follow one grammar (below).
 - **Dashboard apps** (`dashboard`, `dashboard-init`, `dashboard-dev`,
   `dashboard-sdk`) — create an app from a template of
   `@thinger-io/dashboard-sdk`, develop it on its own dev server (a link with
@@ -40,11 +40,12 @@ It holds everything that is not specific to a product:
   here, marking what needs a given server version), the dashboard SDK's
   reference and types (from its package: the project's version, else the
   CLI's), and the CLI's own.
-- **MCP** (`mcp/*`) — the stdio server and 25 generic tools: eight
-  `resource_*` tools over a catalog of the server's resource types, and the
-  operations that are not CRUD (bucket data, device resources, storage
-  files, dashboard development and publishing, the documentation…), plus that
-  documentation as MCP resources.
+- **MCP** (`mcp/*`) — the stdio server and its eight `resource_*` tools
+  over a catalog of the server's resource types, plus the types and actions
+  every CLI serves next to it (bucket data, storage files, device
+  resources, the guides, the profiles, dashboard apps…) and those of the
+  CLI; the guides are MCP resources too. `mcp --read-only` serves only what
+  reads.
 - **OpenAPI** (`openapi`) — the server's own API description, cached per
   server and version, with a bundled copy as fallback.
 
@@ -85,26 +86,25 @@ servers.
   or subcommands inside the generic groups.
 - `onNoCommand(program)` — what to do when called without arguments
   (default: help).
-- `mcpTools` — the CLI's own MCP tools, declared with bare names
-  (`name: 'device_exec'`) and referring to others in descriptions as
-  `{tool:resource_list}` or `{family:storage_file}`. Unknown references fail
-  at startup. A tool flagged `replaces: true` swaps out the generic tool of
-  the same name.
 - `resourceHooks` — the CLI's hooks on catalog types (`{ product: {
-afterDelete } }`), run after the core's: see `mcp/resource-hooks.js`.
+afterDelete } }`), run after the core's: see `mcp/resource-hooks.js`. A
+  `describe` hook adds to what `resource_describe` shows of the type.
 - `resourceTypes` — resource types of the CLI's own platform, served by the
   same `resource_*` tools as the server's: instead of a REST path each has
   functions for the verbs it supports (`list`, `get`, `create`, `update`,
-  `delete`), its `parent` and `id`, a `schema` and `notes` for
-  `resource_describe`, and `actions` for `resource_call` (`on: 'item'`,
-  `'collection'` or `'either'`). The core checks the parent and id, and
-  searches and pages what `list` returns. See `LocalType` in
+  `delete`), its `parent` and `id` (the keys of `ids`), a `schema`, `notes`
+  and `examples` for `resource_describe`, and `actions` for `resource_call`
+  (`on: 'item'`, `'collection'` or `'either'`; `readOnly`, `confirm`,
+  `bodyRequired`). The core checks the ids, the filter and the examples,
+  and searches and pages what `list` returns. See `LocalType` in
   `mcp/tools-resource.js`.
 - `resourceActions` — actions the CLI adds to the server's types
   (`{ device: { reboot: { description, run } } }`), run with
   `resource_call` like the server's. A type or action that clashes with the
-  catalog fails at startup.
-- `mcpInstructions` — server-level guidance sent to MCP clients.
+  catalog or the core fails at startup.
+- `mcpInstructions` — server-level guidance sent to MCP clients. Texts
+  refer to an operation as `{op:<type>.<verb|action>}` (`{op:doc.get}`),
+  checked when the tools are built.
 - `argumentHelp` — `{ byCommand, byName }`: help of the positional
   arguments of the CLI's own commands (`{ 'device logs': { unit: '…' } }`).
 
@@ -144,19 +144,25 @@ with another meaning (`shorts`) and the rules a command does not follow
 
 ## MCP tools
 
-Tool names follow `<object>[_<subobject>]_<verb>`, with the verbs list, get,
-describe, create, update, delete, clone, call, read, write, send.
-
-The server's collections are reached through eight generic tools —
-`resource_describe`, `resource_list`, `resource_get`, `resource_create`,
-`resource_update`, `resource_delete`, `resource_clone`, `resource_call`
-(actions that are not CRUD) — that take a `type`
-from the catalog (`lib/mcp/catalog.js`), a `parent` for child types and an
-`id`. The catalog is a reviewed table, never discovered at run time: each
-type has its path, API version, parent, id and the verbs it allows, with the
-server's operationId for each (the tests check them against the bundled
-OpenAPI document). `resource_describe` reads the request schemas and
-examples from the OpenAPI document of the server the profile points at.
+The MCP serves eight tools — `resource_describe`, `resource_list`,
+`resource_get`, `resource_create`, `resource_update`, `resource_delete`,
+`resource_clone`, `resource_call` (actions that are not CRUD) — that take a
+`type` from the catalog (`lib/mcp/catalog.js`), the core's types
+(`lib/mcp/core-types.js`) or the CLI's, and `ids`: one key per level, named
+as the server's REST path names it (`{"device": "d1", "bucket": "b1"}`,
+`{"product": "p1", "resource": "temp"}`, `{"rule": "high_temp"}`). A record
+the tools answer carries its `ids`, ready to pass back. The catalog is a
+reviewed table, never discovered at run time: each type has its path, API
+version, parent, id and the verbs it allows, with the server's operationId
+for each (the tests check them against the bundled OpenAPI document).
+`resource_describe` reads the request schemas and examples from the OpenAPI
+document of the server the profile points at, and shows each type's ids,
+actions, permissions and ready-to-send examples (checked by the tests).
+Actions that change a lot at once (`replace_all`, a host's
+`update_settings`, `dashboard publish` with prune…) answer a plan first and
+run with `confirm: true`; MCP clients that support elicitation are asked
+instead. `mcp --read-only` (or `<PREFIX>_MCP_READ_ONLY=1`) serves only
+describe, list, get and the read-only actions.
 
 To draft catalog entries after an API change:
 
