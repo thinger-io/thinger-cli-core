@@ -63,26 +63,32 @@ describe('resource catalog', () => {
             method: 'get',
             url: '/v1/domains',
         });
-        assert.deepEqual(actionRequest('domain', 'verify', { id: 'iot.acme.com' }), {
+        assert.deepEqual(actionRequest('domain', 'verify', { ids: { domain: 'iot.acme.com' } }), {
             method: 'post',
             url: '/v1/domains/iot.acme.com/verify',
             query: undefined,
         });
-        assert.deepEqual(actionRequest('plugin', 'install', { id: 'node-red', user: ACCOUNT }), {
-            method: 'post',
-            url: '/v1/users/acme/plugins/node-red',
-            query: { action: 'create' },
-        });
+        assert.deepEqual(
+            actionRequest('plugin', 'install', {
+                ids: { plugin: 'node-red' },
+                user: ACCOUNT,
+            }),
+            {
+                method: 'post',
+                url: '/v1/users/acme/plugins/node-red',
+                query: { action: 'create' },
+            },
+        );
         assert.equal(
-            actionRequest('device', 'stats', { id: 'd1', user: ACCOUNT }).url,
+            actionRequest('device', 'stats', { ids: { device: 'd1' }, user: ACCOUNT }).url,
             '/v3/users/acme/devices/d1/stats',
         );
         assert.equal(
-            actionRequest('brand', 'test_email', { id: 'acme' }).url,
+            actionRequest('brand', 'test_email', { ids: { brand: 'acme' } }).url,
             '/v1/brands/acme/email/test',
         );
         assert.throws(
-            () => actionRequest('domain', 'restart', { id: 'x' }),
+            () => actionRequest('domain', 'restart', { ids: { domain: 'x' } }),
             /has no action "restart" \(it has: verify\)/,
         );
     });
@@ -104,7 +110,10 @@ describe('resource catalog', () => {
             url: '/v1/users/acme/devices',
         });
         assert.deepEqual(
-            requestFor('device_property', 'patch', { parent: 'd1', id: 'cfg', user: ACCOUNT }),
+            requestFor('device_property', 'patch', {
+                ids: { device: 'd1', property: 'cfg' },
+                user: ACCOUNT,
+            }),
             {
                 method: 'patch',
                 url: '/v3/users/acme/devices/d1/properties/cfg',
@@ -113,18 +122,17 @@ describe('resource catalog', () => {
         assert.deepEqual(ancestry('device_bucket_tag'), ['device', 'device_bucket']);
         assert.equal(
             requestFor('device_bucket_tag', 'get', {
-                parent: 'd1/temps',
-                id: 'site',
+                ids: { device: 'd1', bucket: 'temps', tag: 'site' },
                 user: ACCOUNT,
             }).url,
             '/v3/users/acme/devices/d1/buckets/temps/tags/site',
         );
         assert.equal(
-            requestFor('device', 'clone', { id: 'd1', user: ACCOUNT }).url,
+            requestFor('device', 'clone', { ids: { device: 'd1' }, user: ACCOUNT }).url,
             '/v1/users/acme/devices/d1/clone',
         );
         assert.equal(
-            requestFor('device_callback', 'get', { parent: 'd1', user: ACCOUNT }).url,
+            requestFor('device_callback', 'get', { ids: { device: 'd1' }, user: ACCOUNT }).url,
             '/v3/users/acme/devices/d1/callback',
         );
     });
@@ -132,8 +140,7 @@ describe('resource catalog', () => {
     it('creates upsert types with PUT on the item', () => {
         assert.deepEqual(
             requestFor('product_profile_api', 'create', {
-                parent: 'p1',
-                id: 'ingest',
+                ids: { product: 'p1', resource: 'ingest' },
                 user: ACCOUNT,
             }),
             { method: 'put', url: '/v1/users/acme/products/p1/profile/api/ingest' },
@@ -143,22 +150,57 @@ describe('resource catalog', () => {
     it('rejects missing or malformed ids and unsupported verbs', () => {
         assert.throws(
             () => requestFor('device', 'get', { user: ACCOUNT }),
-            /id \(<device>\) is required/,
+            /missing device: the device's id/,
         );
         assert.throws(
-            () => requestFor('device_bucket_tag', 'list', { parent: 'd1', user: ACCOUNT }),
-            /parent \(<device>\/<bucket>\) is required/,
+            () => requestFor('device_bucket_tag', 'list', { ids: { device: 'd1' }, user: ACCOUNT }),
+            /missing bucket: the device_bucket's id/,
         );
         assert.throws(
-            () => requestFor('device_bucket', 'delete', { parent: 'd1', user: ACCOUNT }),
+            () =>
+                requestFor('device_bucket_tag', 'list', {
+                    ids: { device: 'd1', bucket: 'b', tag: 't' },
+                }),
+            /list takes no tag: leave it out of ids/,
+        );
+        assert.throws(
+            () => requestFor('device_property', 'get', { ids: { device: 'd1', bucket: 'x' } }),
+            /device_property takes ids device and property; unknown: bucket/,
+        );
+        assert.throws(
+            () => requestFor('device', 'get', { ids: { device: '..' } }),
+            /ids.device: invalid id "\.\."/,
+        );
+        assert.throws(
+            () => requestFor('device', 'get', { ids: { device: '' } }),
+            /ids.device: invalid id ""/,
+        );
+        assert.throws(
+            () => requestFor('product_profile_api', 'create', { ids: { product: 'p1' } }),
+            /missing resource: the entry's name \(it is stored under it\)/,
+        );
+        assert.throws(
+            () => actionRequest('device', 'overview', { ids: { device: 'd1' } }),
+            /has no action "overview"/,
+        );
+        assert.throws(
+            () => requestFor('device_bucket', 'delete', { ids: { device: 'd1' }, user: ACCOUNT }),
             /does not support/,
         );
     });
 
     it('escapes ids into the URL', () => {
         assert.equal(
-            requestFor('device', 'get', { id: 'a b', user: ACCOUNT }).url,
+            requestFor('device', 'get', { ids: { device: 'a b' }, user: ACCOUNT }).url,
             '/v1/users/acme/devices/a%20b',
+        );
+        // One id is one segment: a "/" in it does not reach another path.
+        assert.equal(
+            requestFor('device_property', 'get', {
+                ids: { device: 'd/1', property: 7 },
+                user: ACCOUNT,
+            }).url,
+            '/v3/users/acme/devices/d%2F1/properties/7',
         );
     });
 });
@@ -169,23 +211,31 @@ describe('resource tools', () => {
     // Permissions by verb: each tool offers exactly the types that support
     // its verb, so the model cannot even name a delete the catalog forbids.
     it('offer, per verb, exactly the types that support it', () => {
+        const core = { list: ['bucket_data', 'storage_file', 'device_resource', 'doc', 'profile'] };
+        Object.assign(core, {
+            get: ['storage_file', 'doc'],
+            create: ['bucket_data', 'storage_file'],
+            delete: ['storage_file'],
+            clone: [],
+        });
         for (const verb of ['list', 'get', 'create', 'delete', 'clone']) {
             const tool = byName[`acme_resource_${verb}`];
             const expected = Object.keys(CATALOG).filter((n) => verb in CATALOG[n].ops);
-            assert.deepEqual(tool.inputSchema.properties.type.enum, expected, verb);
+            assert.deepEqual(
+                tool.inputSchema.properties.type.enum,
+                [...expected, ...core[verb]],
+                verb,
+            );
         }
         assert.ok(
             !byName.acme_resource_delete.inputSchema.properties.type.enum.includes('device_bucket'),
         );
     });
 
-    it('stay a short list', () => {
-        assert.ok(tools.length <= 25, `${tools.length} tools`);
-    });
-
     it('describe types without a server, from the catalog', async () => {
         const result = await byName.acme_resource_describe.handler({});
-        assert.match(result.content[0].text, /device_property \(parent <device>\)/);
+        assert.match(result.content[0].text, /^device_property \(ids device, property\): /m);
+        assert.match(result.content[0].text, /^device_callback \(ids device; single record\): /m);
     });
 });
 
@@ -294,18 +344,22 @@ describe('plugin catalog', () => {
                     (
                         await byName.acme_resource_get.handler({
                             type: 'plugin',
-                            id: 'lht65n',
+                            ids: { plugin: 'lht65n' },
                             user: 'acme',
                             full,
                         })
                     ).content[0].text,
                 );
             const short = await get(undefined);
+            assert.deepEqual(short.ids, { plugin: 'lht65n' });
+            delete short.ids;
             const product = short.resources.products[0];
             assert.equal(product._resources, undefined);
             assert.deepEqual(product.profile, { buckets: { b: {} }, code: { version: '1.0' } });
             assert.match(short.omitted, /full: true/);
-            assert.deepEqual(await get(true), manifest);
+            const whole = await get(true);
+            delete whole.ids;
+            assert.deepEqual(whole, manifest);
         } finally {
             s.restore();
         }

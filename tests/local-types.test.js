@@ -17,7 +17,8 @@ function notesType() {
         type: {
             description: 'Notes kept on a device.',
             parent: 'device',
-            id: 'name',
+            id: 'note',
+            bodyId: 'name',
             schema: { type: 'object', properties: { name: {}, text: {} } },
             describe: async () => ({ reference: { kinds: ['memo', 'todo'] } }),
             notes: 'Use {tool:resource_call} action "archive" to archive one.',
@@ -64,7 +65,7 @@ function notesType() {
 
 function build(extra = {}) {
     const notes = notesType();
-    const tools = buildTools([], {
+    const tools = buildTools({
         types: { device_note: notes.type, ...(extra.types || {}) },
         actions: extra.actions,
     });
@@ -78,25 +79,29 @@ const textOf = (result) => result.content[0].text;
 describe('resource types a CLI adds', () => {
     it('serves list, get, create, update and delete through the resource tools', async () => {
         const { call } = build();
-        const where = { type: 'device_note', parent: 'pump_1' };
+        const where = { type: 'device_note', ids: { device: 'pump_1' } };
+        const at = (note) => ({ type: 'device_note', ids: { device: 'pump_1', note } });
+        const created = textOf(await call('resource_create', { ...at('a'), body: { text: 'hi' } }));
         assert.match(
-            textOf(await call('resource_create', { ...where, id: 'a', body: { text: 'hi' } })),
-            /Created device_note pump_1\/a/,
+            created,
+            /^Created device_note pump_1\/a\.\nids: \{"device":"pump_1","note":"a"\}/,
         );
-        // The id goes into the body field, as for server types.
+        // The id may come in the body field instead.
         await call('resource_create', { ...where, body: { name: 'b', text: 'there' } });
         const list = textOf(await call('resource_list', where));
         assert.match(list, /^2 device_note:/);
-        assert.match(list, /"name":"a"/);
-        assert.deepEqual(JSON.parse(textOf(await call('resource_get', { ...where, id: 'a' }))), {
+        // Each record starts with the ids to pass back.
+        assert.match(list, /^\{"ids":\{"device":"pump_1","note":"a"\},"name":"a"/m);
+        assert.deepEqual(JSON.parse(textOf(await call('resource_get', at('a')))), {
+            ids: { device: 'pump_1', note: 'a' },
             name: 'a',
             text: 'hi',
         });
         assert.match(
-            textOf(await call('resource_update', { ...where, id: 'a', body: { text: 'bye' } })),
+            textOf(await call('resource_update', { ...at('a'), body: { text: 'bye' } })),
             /Updated device_note pump_1\/a: text\.\nsaved/,
         );
-        await call('resource_delete', { ...where, id: 'b' });
+        await call('resource_delete', at('b'));
         assert.match(textOf(await call('resource_list', where)), /^1 device_note:/);
     });
 
@@ -106,15 +111,11 @@ describe('resource types a CLI adds', () => {
         for (let i = 0; i < 60; i++)
             device.set(`n${i}`, { name: `n${i}`, text: i % 2 ? 'odd' : 'even' });
         notes.store.set('pump_1', device);
-        const page = textOf(await call('resource_list', { type: 'device_note', parent: 'pump_1' }));
+        const where = { type: 'device_note', ids: { device: 'pump_1' } };
+        const page = textOf(await call('resource_list', where));
         assert.match(page, /60 in total, showing 0–49; pass index: 50/);
         const odd = textOf(
-            await call('resource_list', {
-                type: 'device_note',
-                parent: 'pump_1',
-                search: 'odd',
-                filter: { path: '/x' },
-            }),
+            await call('resource_list', { ...where, search: 'odd', filter: { path: '/x' } }),
         );
         assert.match(odd, /^30 device_note:/);
         // The filter reaches the CLI's function.
@@ -123,42 +124,55 @@ describe('resource types a CLI adds', () => {
 
     it('asks for the parent and the id', async () => {
         const { call } = build();
+        const where = { type: 'device_note', ids: { device: 'pump_1' } };
         await assert.rejects(
             call('resource_list', { type: 'device_note' }),
-            /parent \(<device>\) is required/,
+            /missing device: the device's id/,
+        );
+        await assert.rejects(call('resource_get', where), /missing note: the device_note's id/);
+        await assert.rejects(
+            call('resource_create', { ...where, body: { text: 'x' } }),
+            /missing note: give it in ids.note or in the body field "name"/,
         );
         await assert.rejects(
-            call('resource_get', { type: 'device_note', parent: 'pump_1' }),
-            /id \(<name>\) is required/,
+            call('resource_create', {
+                type: 'device_note',
+                ids: { device: 'pump_1', note: 'a' },
+                body: { name: 'b' },
+            }),
+            /ids.note and body.name differ/,
         );
         await assert.rejects(
-            call('resource_create', { type: 'device_note', parent: 'pump_1', body: { text: 'x' } }),
-            /give the device_note id/,
+            call('resource_list', { type: 'device_note', ids: { device: 'pump_1', note: 'a' } }),
+            /list takes no note: leave it out of ids/,
         );
         await assert.rejects(
-            call('resource_clone', { type: 'device_note', parent: 'pump_1', id: 'a', body: {} }),
-            /Unknown type|does not support clone/,
+            call('resource_clone', {
+                type: 'device_note',
+                ids: { device: 'pump_1', note: 'a' },
+                body: {},
+            }),
+            /does not support clone \(it supports: list, get, create, update, delete\)/,
         );
     });
 
     it('runs its actions with resource_call, with or without id as declared', async () => {
         const { call } = build();
-        const where = { type: 'device_note', parent: 'pump_1' };
-        await call('resource_create', { ...where, id: 'a', body: {} });
+        const where = { type: 'device_note', ids: { device: 'pump_1' } };
+        const a = { type: 'device_note', ids: { device: 'pump_1', note: 'a' } };
+        await call('resource_create', { ...a, body: {} });
         assert.deepEqual(
-            JSON.parse(
-                textOf(await call('resource_call', { ...where, action: 'archive', id: 'a' })),
-            ),
+            JSON.parse(textOf(await call('resource_call', { ...a, action: 'archive' }))),
             { archived: 'a' },
         );
         assert.equal(textOf(await call('resource_call', { ...where, action: 'count' })), '1 notes');
         await assert.rejects(
             call('resource_call', { ...where, action: 'archive' }),
-            /id \(<name>\) is required/,
+            /missing note: the device_note's id/,
         );
         await assert.rejects(
-            call('resource_call', { ...where, action: 'count', id: 'a' }),
-            /takes no id/,
+            call('resource_call', { ...a, action: 'count' }),
+            /count acts on every device_note: leave note out of ids/,
         );
         await assert.rejects(
             call('resource_call', { ...where, action: 'nope' }),
@@ -187,7 +201,13 @@ describe('resource types a CLI adds', () => {
             },
         });
         assert.equal(
-            textOf(await call('resource_call', { type: 'device', action: 'reboot', id: 'pump_1' })),
+            textOf(
+                await call('resource_call', {
+                    type: 'device',
+                    action: 'reboot',
+                    ids: { device: 'pump_1' },
+                }),
+            ),
             'rebooting pump_1',
         );
         assert.equal(
@@ -212,12 +232,16 @@ describe('resource types a CLI adds', () => {
         });
         const described = textOf(await call('resource_describe', { type: 'device_note' }));
         assert.match(described, /^type: device_note/m);
-        assert.match(described, /^parent: device \(write it as "<device>"\)/m);
-        assert.match(described, /^id: <name>/m);
+        assert.match(described, /^ids: \{"device": <device id>, "note": <its own id>\}$/m);
+        assert.match(described, /^own_id: required: in ids.note, or the body field "name"$/m);
         assert.match(described, /"list":"acme_resource_list"/);
         assert.match(
             described,
-            /"count":\{"run":"acme_resource_call action \\"count\\"".*"id":"none"/,
+            /"count":\{"run":"acme_resource_call type \\"device_note\\" action \\"count\\"".*"ids":"parents only: no note"/,
+        );
+        assert.match(
+            described,
+            /^examples:\n\{"tool":"acme_resource_list","arguments":\{"type":"device_note","ids":\{"device":"boiler"\}\}/m,
         );
         assert.match(described, /Use acme_resource_call action "archive"/);
         assert.match(described, /^fields: /m);
@@ -225,7 +249,7 @@ describe('resource types a CLI adds', () => {
         const summary = textOf(await call('resource_describe', {}));
         assert.match(
             summary,
-            /^device_note \(parent <device>\): Notes kept on a device\. \[list get create update delete \| archive fail count\]$/m,
+            /^device_note \(ids device, note\): Notes kept on a device\. \[list get create update delete \| archive fail count\]$/m,
         );
         assert.match(summary, /^device: .*\| .*reboot\]$/m);
         for (const tool of [
@@ -252,7 +276,10 @@ describe('resource types a CLI adds', () => {
             new Map([['big', { name: 'big', text: 'x'.repeat(MAX_TEXT + 10) }]]),
         );
         const read = textOf(
-            await call('resource_get', { type: 'device_note', parent: 'pump_1', id: 'big' }),
+            await call('resource_get', {
+                type: 'device_note',
+                ids: { device: 'pump_1', note: 'big' },
+            }),
         );
         assert.ok(read.length < MAX_TEXT + 200);
         assert.match(read, /… \(cut: \d+ characters in total, showing the first 100000\)$/);
@@ -261,29 +288,29 @@ describe('resource types a CLI adds', () => {
     it('refuses what clashes with the server catalog', () => {
         const run = () => {};
         assert.throws(
-            () => buildTools([], { types: { device: { description: 'x', list: () => [] } } }),
+            () => buildTools({ types: { device: { description: 'x', list: () => [] } } }),
             /"device" is already a server type/,
         );
         assert.throws(
             () =>
-                buildTools([], {
+                buildTools({
                     types: { thing: { description: 'x', parent: 'nope', list: () => [] } },
                 }),
             /unknown parent "nope"/,
         );
         assert.throws(
             () =>
-                buildTools([], {
+                buildTools({
                     actions: { alarm_instance: { stats: { description: 'x', run } } },
                 }),
             /already has an action "stats"/,
         );
         assert.throws(
-            () => buildTools([], { actions: { nope: { x: { description: 'x', run } } } }),
+            () => buildTools({ actions: { nope: { x: { description: 'x', run } } } }),
             /unknown resource type "nope"/,
         );
         assert.throws(
-            () => buildTools([], { types: { thing: { description: 'x' } } }),
+            () => buildTools({ types: { thing: { description: 'x' } } }),
             /has no operations/,
         );
     });
@@ -302,42 +329,48 @@ describe('resource types a CLI adds: what the review asked for', () => {
         });
         await assert.rejects(
             call('resource_call', { type: 'device', action: 'reboot' }),
-            /id \(<device>\) is required/,
+            /missing device: the device's id/,
         );
         await assert.rejects(
-            call('resource_call', { type: 'device_property', action: 'touch', id: 'p' }),
-            /parent \(<device>\) is required/,
+            call('resource_call', {
+                type: 'device_property',
+                action: 'touch',
+                ids: { property: 'p' },
+            }),
+            /missing device: the device's id/,
         );
         assert.equal(
             textOf(
                 await call('resource_call', {
                     type: 'device_property',
                     action: 'touch',
-                    parent: 'pump_1',
-                    id: 'p',
+                    ids: { device: 'pump_1', property: 'p' },
                 }),
             ),
             'ran on pump_1 p',
         );
-        // Parent and id segments: as many as the location has, none `..`.
-        for (const parent of ['pump_1/x', '..', '']) {
+        // Ids are values: never empty, `.`, `..` or with control characters.
+        for (const device of ['..', '.', '', 'a\nb', true]) {
             await assert.rejects(
                 call('resource_call', {
                     type: 'device_property',
                     action: 'touch',
-                    parent,
-                    id: 'p',
+                    ids: { device, property: 'p' },
                 }),
-                /parent \(<device>\) is required/,
-                parent,
+                /ids.device: invalid id/,
+                String(device),
             );
         }
+        await assert.rejects(
+            call('resource_call', { type: 'device', action: 'reboot', ids: 'pump_1' }),
+            /ids must be an object/,
+        );
         assert.equal(
             textOf(
                 await call('resource_call', {
                     type: 'device_bucket',
                     action: 'flush',
-                    parent: 'pump_1',
+                    ids: { device: 'pump_1' },
                 }),
             ),
             'ran on pump_1 -',
@@ -358,25 +391,23 @@ describe('resource types a CLI adds: what the review asked for', () => {
                     description: 'Items of a box.',
                     parent: 'box',
                     id: 'item',
-                    get: (ctx) => (seen.push([ctx.parent, ctx.id]), { item: ctx.id }),
+                    get: (ctx) => (seen.push([ctx.parent, ctx.id, ctx.ids]), { item: ctx.id }),
                 },
             },
         });
         const summary = textOf(await call('resource_describe', {}));
-        assert.match(summary, /^box_item \(parent <device>\/<box>\): /m);
-        await call('resource_get', { type: 'box_item', parent: 'pump_1/b1', id: '/a/b.txt' });
-        assert.deepEqual(seen, [['pump_1/b1', '/a/b.txt']]);
+        assert.match(summary, /^box_item \(ids device, box, item\): /m);
+        const ids = { device: 'pump_1', box: 'b1', item: '/a/b.txt' };
+        const got = JSON.parse(textOf(await call('resource_get', { type: 'box_item', ids })));
+        assert.deepEqual(got.ids, ids);
+        assert.deepEqual(seen, [['pump_1/b1', '/a/b.txt', ids]]);
         await assert.rejects(
-            call('resource_get', { type: 'box_item', parent: 'pump_1', id: 'x' }),
-            /parent \(<device>\/<box>\) is required/,
+            call('resource_get', { type: 'box_item', ids: { device: 'pump_1', item: 'x' } }),
+            /missing box: the box's id/,
         );
         await assert.rejects(
-            call('resource_get', { type: 'box_item', parent: 'pump_1/../x', id: 'x' }),
-            /parent/,
-        );
-        await assert.rejects(
-            call('resource_get', { type: 'box_item', parent: 'pump_1/b1', id: 'a\nb' }),
-            /id \(<item>\) is required/,
+            call('resource_get', { type: 'box_item', ids: { ...ids, item: 'a\nb' } }),
+            /ids.item: invalid id/,
         );
     });
 
@@ -387,7 +418,7 @@ describe('resource types a CLI adds: what the review asked for', () => {
             ctx.state.read = true;
             return { name: ctx.id };
         };
-        const tools = buildTools([], {
+        const tools = buildTools({
             types: { device_note: notes.type },
             hooks: {
                 device_note: {
@@ -402,12 +433,15 @@ describe('resource types a CLI adds: what the review asked for', () => {
         });
         const call = (tool, args) => tools.find((t) => t.name === `acme_${tool}`).handler(args);
         // Not located: the hook does not run.
-        await assert.rejects(call('resource_create', { type: 'device_note', body: {} }), /parent/);
+        await assert.rejects(
+            call('resource_create', { type: 'device_note', body: {} }),
+            /missing device/,
+        );
         assert.deepEqual(order, []);
         const created = textOf(
             await call('resource_create', {
                 type: 'device_note',
-                parent: 'pump_1',
+                ids: { device: 'pump_1' },
                 body: { text: 'x' },
             }),
         );
@@ -417,8 +451,7 @@ describe('resource types a CLI adds: what the review asked for', () => {
             textOf(
                 await call('resource_get', {
                     type: 'device_note',
-                    parent: 'pump_1',
-                    id: 'from_hook',
+                    ids: { device: 'pump_1', note: 'from_hook' },
                 }),
             ),
         );
@@ -427,27 +460,30 @@ describe('resource types a CLI adds: what the review asked for', () => {
 
     it('refuses what CLI types cannot take and survives empty answers', async () => {
         const { call, notes } = build();
-        const where = { type: 'device_note', parent: 'pump_1' };
+        const where = { type: 'device_note', ids: { device: 'pump_1', note: 'a' } };
         await assert.rejects(
-            call('resource_update', { ...where, id: 'a', body: { text: 'x' }, merge: true }),
+            call('resource_update', { ...where, body: { text: 'x' }, merge: true }),
             /takes no merge/,
         );
+        await assert.rejects(call('resource_update', { ...where, body: ['x'] }), /JSON object/);
         await assert.rejects(
-            call('resource_update', { ...where, id: 'a', body: ['x'] }),
-            /JSON object/,
+            call('resource_update', { ...where, body: { ids: { device: 'other' }, text: 'x' } }),
+            /body.ids points at other but ids at pump_1\/a/,
         );
         notes.type.get = () => undefined;
-        assert.equal(
-            textOf(await call('resource_get', { ...where, id: 'a' })),
-            'No device_note pump_1/a.',
-        );
+        assert.equal(textOf(await call('resource_get', where)), 'No device_note pump_1/a.');
+        const device = { type: 'device', ids: { device: 'x' } };
         await assert.rejects(
-            call('resource_call', { type: 'device', action: 'constructor', id: 'x' }),
+            call('resource_call', { ...device, action: 'constructor' }),
             /has no action "constructor"/,
         );
         await assert.rejects(
-            call('resource_call', { type: 'device', action: 'nope', id: 'x' }),
-            /has no action "nope"/,
+            call('resource_call', { ...device, action: 'nope' }),
+            /has no action "nope" \(it has: stats, send, overview\)/,
+        );
+        await assert.rejects(
+            call('resource_call', { type: 'bucket_export', action: 'x' }),
+            /Type "bucket_export" has no actions\. Types with actions: .*device/,
         );
     });
 
@@ -455,7 +491,11 @@ describe('resource types a CLI adds: what the review asked for', () => {
         const { call, notes } = build();
         notes.store.set('pump_1', new Map(['a', 'b', 'c'].map((n) => [n, { name: n }])));
         const page = textOf(
-            await call('resource_list', { type: 'device_note', parent: 'pump_1', index: 1 }),
+            await call('resource_list', {
+                type: 'device_note',
+                ids: { device: 'pump_1' },
+                index: 1,
+            }),
         );
         assert.match(page, /^2 device_note:/);
         assert.match(page, /3 in total, showing 1–2/);
@@ -478,9 +518,10 @@ describe('resource types a CLI adds: what the review asked for', () => {
                 },
             },
         });
-        const record = await call('resource_call', { type: 'device', action: 'record', id: 'd' });
+        const d = { type: 'device', ids: { device: 'd' } };
+        const record = await call('resource_call', { ...d, action: 'record' });
         assert.deepEqual(JSON.parse(textOf(record)), { content: ['a'] });
-        const big = await call('resource_call', { type: 'device', action: 'big', id: 'd' });
+        const big = await call('resource_call', { ...d, action: 'big' });
         assert.match(textOf(big), /cut: \d+ characters/);
     });
 
@@ -506,14 +547,14 @@ describe('resource types a CLI adds: what the review asked for', () => {
         const run = () => {};
         assert.throws(
             () =>
-                buildTools([], {
+                buildTools({
                     actions: { device: { x: { description: 'x', on: 'colection', run } } },
                 }),
             /on must be item, collection or either/,
         );
         assert.throws(
             () =>
-                buildTools([], {
+                buildTools({
                     types: {
                         a: { description: 'a', parent: 'b', id: 'a', list: () => [] },
                         b: { description: 'b', parent: 'a', id: 'b', list: () => [] },
@@ -523,7 +564,7 @@ describe('resource types a CLI adds: what the review asked for', () => {
         );
         assert.throws(
             () =>
-                buildTools([], {
+                buildTools({
                     types: {
                         single: { description: 's', parent: 'device', list: () => [] },
                         child: { description: 'c', parent: 'single', id: 'c', list: () => [] },
@@ -549,7 +590,11 @@ describe('server types are not cut', () => {
         try {
             const { call } = build();
             const read = textOf(
-                await call('resource_get', { type: 'device', id: 'big', user: 'acme' }),
+                await call('resource_get', {
+                    type: 'device',
+                    ids: { device: 'big' },
+                    user: 'acme',
+                }),
             );
             assert.equal(JSON.parse(read).logo.length, MAX_TEXT + 10);
         } finally {

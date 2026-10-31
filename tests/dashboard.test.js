@@ -146,7 +146,7 @@ describe('dashboard MCP surface', () => {
                 'acme://dashboard-sdk-types',
             ],
         );
-        assert.match(resources[0].description, /acme_doc_read/);
+        assert.match(resources[0].description, /acme_resource_get type "doc"/);
         assert.equal(resources[0].mimeType, 'text/markdown');
         assert.match((await readResource('acme://concepts')).text, /^# Thinger concepts/);
         assert.doesNotMatch((await readResource('acme://concepts')).text, /\/sdk\//);
@@ -224,7 +224,16 @@ describe('dashboard MCP surface', () => {
         }
     });
 
-    it('catalog notes refer to existing tools', () => {
+    it('catalog notes refer to existing tools and operations', () => {
+        // Operations are checked when the tools are built.
+        assert.throws(
+            () =>
+                buildTools({
+                    types: { x: { description: 'See {op:device.reboot}.', list: () => [] } },
+                }),
+            /\{op:device\.reboot\}: device has no operation "reboot"/,
+        );
+
         const names = new Set(buildTools().map((t) => t.name.replace(/^acme_/, '')));
         for (const [name, type] of Object.entries(CATALOG)) {
             for (const text of [type.description, type.notes || '']) {

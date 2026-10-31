@@ -273,11 +273,14 @@ describe('generic resource commands', () => {
     it('name ids after their noun and put the profile under product profile', () => {
         const p = program();
         const usage = (path) => find(p, path)?.usage();
-        assert.equal(usage(['asset', 'type', 'get']), '[options] <asset-type>');
+        // Ids are named as the server names them, in kebab case.
+        assert.equal(usage(['asset', 'type', 'get']), '[options] <type>');
+        assert.equal(usage(['asset', 'group', 'get']), '[options] <group>');
+        assert.equal(usage(['alarm', 'instance', 'get']), '[options] <instance>');
         assert.equal(usage(['admin', 'oauth-client', 'get']), '[options] <oauth-client>');
-        assert.equal(usage(['product', 'profile', 'api', 'get']), '[options] <product> <api>');
+        assert.equal(usage(['product', 'profile', 'api', 'get']), '[options] <product> <resource>');
         assert.equal(usage(['bucket', 'export-file', 'delete']), '[options] <bucket> <file>');
-        assert.equal(usage(['alarm', 'rule', 'test']), '[options] <alarm-rule>');
+        assert.equal(usage(['alarm', 'rule', 'test']), '[options] <rule>');
         assert.equal(usage(['admin', 'host', 'get-settings']), '[options] <host>');
         assert.equal(usage(['plugin', 'uninstall']), '[options] <plugin>');
         assert.equal(usage(['sync', 'lock', 'list']), '[options] <sync>');
@@ -369,7 +372,8 @@ describe('generic resource commands', () => {
         for (const verb of ['list', 'get', 'describe']) group.command(verb).helpGroup('Records:');
         const said = [
             'type: alarm_rule',
-            'id: <rule>',
+            'ids: {"rule": <its own id>}',
+            'own_id: create takes it in ids.rule or in the body field "rule"',
             'operations: {"list":"acme_resource_list","get":"acme_resource_get"}',
             'notes: Try it with the test_rule action. Confirm with the user first.',
             `create: ${JSON.stringify({
@@ -385,9 +389,20 @@ describe('generic resource commands', () => {
             })}`,
             'actions: {"test_rule":{"run":"acme_resource_call","does":"Evaluate `body`. Confirm with the user first."}}',
             'permissions: {"resource_type":"Alarm","actions":{"list":"ListAlarmRules","test_rule":"TestRule"}}',
+            'examples:',
+            '{"tool":"acme_resource_get","arguments":{"type":"alarm_rule","ids":{"rule":"high_temp"}},"does":"Read one."}',
+            '{"tool":"acme_resource_list","arguments":{"type":"alarm_rule","filter":{"x":1}},"does":"Filtered."}',
+            '{"tool":"acme_resource_call","arguments":{"type":"alarm_rule","action":"test_rule","ids":{"rule":"r1"},"body":{"a":1}},"does":"Test it."}',
         ].join('\n');
         const out = describeForCli(said, 'alarm_rule', group);
-        assert.match(out, /^id: <alarm-rule>$/m);
+        assert.match(out, /^id: <rule>$/m);
+        assert.doesNotMatch(out, /own_id/);
+        assert.match(out, /^ {2}acme alarm rule get high_temp {2}# Read one\.$/m);
+        assert.match(
+            out,
+            /^ {2}echo '\{"a":1\}' \| acme alarm rule test r1 --from - {2}# Test it\.$/m,
+        );
+        assert.doesNotMatch(out, /Filtered/);
         assert.match(out, /^commands: acme alarm rule list\|get\|describe$/m);
         assert.match(out, /^notes: Try it with the test action$/m);
         assert.match(out, /^create fields \(\* required\):$/m);
@@ -404,10 +419,20 @@ describe('generic resource commands', () => {
 
     it('describe commands with the commands instead of the tools', () => {
         assert.equal(
-            cliDescription(
-                'Data buckets (time series). Data is read with {tool:bucket_data_read}.',
-            ),
+            cliDescription('Data buckets (time series). Data is read with {op:bucket_data.list}.'),
             'Data buckets (time series). Data is read with `acme bucket read`',
+        );
+        assert.equal(
+            cliWording('Read {op:doc.get} ids {"doc": "server-admin"} first.'),
+            'Read `acme doc get server-admin` first.',
+        );
+        assert.equal(
+            cliWording('Run acme_resource_call type "alarm_rule" action "test_rule" now.'),
+            'Run `acme alarm rule test` now.',
+        );
+        assert.equal(
+            cliWording('See acme_resource_list type "device_property".'),
+            'See `acme device property list`.',
         );
         assert.equal(
             cliDescription('Devices. Their sessions are listed with {tool:sessions}.'),
@@ -492,10 +517,11 @@ describe('raw api calls', () => {
 describe('paths that would point elsewhere', () => {
     it('refuse . and .. as ids: the URL would reach the parent', () => {
         assert.throws(
-            () => requestFor('device_property', 'delete', { parent: 'dev', id: '..' }),
+            () =>
+                requestFor('device_property', 'delete', { ids: { device: 'dev', property: '..' } }),
             /invalid id/,
         );
-        assert.throws(() => requestFor('device', 'get', { id: '.' }), /invalid id/);
+        assert.throws(() => requestFor('device', 'get', { ids: { device: '.' } }), /invalid id/);
     });
 
     it('escape every segment of a storage file and refuse dot segments', () => {

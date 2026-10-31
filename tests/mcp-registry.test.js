@@ -1,30 +1,40 @@
 import './setup.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTools, genericTools } from '../lib/mcp/registry.js';
+import { buildTools } from '../lib/mcp/registry.js';
 import { expandToolRefs } from '../lib/mcp/naming.js';
 
 const tools = buildTools();
+const byName = (list, base) => list.find((t) => t.name === `acme_${base}`);
+
+/** The eight tools, in the order they are listed. */
+const EIGHT = [
+    'resource_describe',
+    'resource_list',
+    'resource_get',
+    'resource_create',
+    'resource_update',
+    'resource_delete',
+    'resource_clone',
+    'resource_call',
+];
 
 describe('mcp registry', () => {
-    it('exports a non-empty array of tools', () => {
-        assert.ok(Array.isArray(tools));
-        assert.ok(tools.length > 0);
+    it('serves the eight resource tools, and nothing else', () => {
+        assert.deepEqual(
+            tools.map((t) => t.name),
+            EIGHT.map((n) => `acme_${n}`),
+        );
     });
 
-    it('every tool has name, description, inputSchema and handler', () => {
+    it('every tool has name, description, inputSchema, annotations and handler', () => {
         for (const t of tools) {
             assert.equal(typeof t.name, 'string', `missing name on ${JSON.stringify(t)}`);
             assert.equal(typeof t.description, 'string', `missing description on ${t.name}`);
             assert.equal(typeof t.inputSchema, 'object', `missing inputSchema on ${t.name}`);
+            assert.equal(typeof t.annotations?.title, 'string', `missing annotations on ${t.name}`);
             assert.equal(typeof t.handler, 'function', `missing handler on ${t.name}`);
         }
-    });
-
-    it('tool names are unique and carry the identity prefix', () => {
-        const names = tools.map((t) => t.name);
-        assert.equal(new Set(names).size, names.length, 'duplicate tool name detected');
-        for (const name of names) assert.match(name, /^acme_[a-z0-9_]+$/);
     });
 
     it('every required field is declared in properties', () => {
@@ -38,68 +48,93 @@ describe('mcp registry', () => {
                 );
             }
         }
+        assert.deepEqual(byName(tools, 'resource_clone').inputSchema.required, [
+            'type',
+            'ids',
+            'body',
+        ]);
+        assert.deepEqual(byName(tools, 'resource_call').inputSchema.required, ['type', 'action']);
     });
 
-    it('every tool (except profile_list) has the injected `profile` option', () => {
+    it('every tool has the injected `profile` option, and ids instead of parent and id', () => {
         for (const t of tools) {
-            if (t.name === 'acme_profile_list') continue;
-            assert.ok(
-                t.inputSchema.properties?.profile,
-                `${t.name} is missing the injected profile param`,
-            );
+            const props = t.inputSchema.properties;
+            assert.ok(props.profile, `${t.name} is missing the injected profile param`);
+            assert.ok(!('parent' in props) && !('id' in props), t.name);
+            if (t.name !== 'acme_resource_describe') {
+                assert.equal(props.ids.type, 'object', t.name);
+                assert.deepEqual(props.ids.additionalProperties, { type: 'string' });
+            }
         }
+    });
+
+    it('annotates what each tool does', () => {
+        const a = (base) => byName(tools, base).annotations;
+        for (const base of ['resource_describe', 'resource_list', 'resource_get']) {
+            assert.equal(a(base).readOnlyHint, true, base);
+        }
+        assert.equal(a('resource_delete').destructiveHint, true);
+        assert.equal(a('resource_create').destructiveHint, false);
+        assert.equal(a('resource_update').idempotentHint, true);
+        assert.deepEqual(a('resource_call'), {
+            title: 'Run a resource action',
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+        });
+    });
+
+    it("resource_call's action enum is every action, sorted", () => {
+        const call = byName(tools, 'resource_call').inputSchema.properties;
+        const actions = call.action.enum;
+        assert.deepEqual(actions, [...new Set(actions)].sort());
+        for (const a of ['call', 'send', 'overview', 'publish', 'replace_all', 'verify']) {
+            assert.ok(actions.includes(a), a);
+        }
+        for (const t of ['device', 'device_resource', 'dashboard', 'plugin']) {
+            assert.ok(call.type.enum.includes(t), t);
+        }
+    });
+
+    it('serves only reads in read-only mode', () => {
+        const ro = buildTools({ readOnly: true });
+        assert.deepEqual(
+            ro.map((t) => t.name),
+            ['resource_describe', 'resource_list', 'resource_get', 'resource_call'].map(
+                (n) => `acme_${n}`,
+            ),
+        );
+        const call = byName(ro, 'resource_call');
+        assert.equal(call.annotations.readOnlyHint, true);
+        const actions = call.inputSchema.properties.action.enum;
+        for (const a of ['overview', 'stats', 'export', 'test_rule', 'logs', 'read_settings']) {
+            assert.ok(actions.includes(a), a);
+        }
+        for (const a of ['call', 'send', 'restart', 'publish', 'replace_all']) {
+            assert.ok(!actions.includes(a), a);
+        }
+        assert.ok(!call.inputSchema.properties.type.enum.includes('device_resource'));
     });
 
     // Descriptions are what the model reads: a leftover placeholder or a
     // reference to another CLI's tools sends it after tools it doesn't have.
     it('descriptions are fully expanded and name only this CLI', () => {
-        const text = JSON.stringify(tools.map(({ handler: _h, ...t }) => t));
-        assert.doesNotMatch(text, /\{(tool|family):/);
+        const text = JSON.stringify(tools.map(({ handler: _h, explain: _e, ...t }) => t));
+        assert.doesNotMatch(text, /\{(tool|family|op):/);
         assert.doesNotMatch(text, /thinr|ThinRemote|thinger_/i);
     });
 
-    it('leaves the declarations untouched, so building twice is stable', () => {
-        assert.ok(genericTools().every((t) => !t.name.startsWith('acme_')));
+    it('builds the same list twice', () => {
         assert.deepEqual(
             buildTools().map((t) => t.name),
             tools.map((t) => t.name),
         );
     });
 
-    it('adds CLI-specific tools and rejects duplicates', () => {
-        const extra = {
-            name: 'hello',
-            description: 'Says hello; see {tool:resource_list}.',
-            inputSchema: { type: 'object', properties: {} },
-            handler: async () => ({ content: [] }),
-        };
-        const built = buildTools([extra]);
-        const hello = built.find((t) => t.name === 'acme_hello');
-        assert.equal(hello.description, 'Says hello; see acme_resource_list.');
-        assert.throws(
-            () => buildTools([{ ...extra, name: 'resource_list' }]),
-            /Duplicate MCP tool name/,
-        );
-        assert.throws(() => buildTools([extra, extra]), /Duplicate MCP tool name/);
-    });
-
-    it('lets a CLI replace a generic tool when it says so', () => {
-        const mine = {
-            name: 'device_overview',
-            replaces: true,
-            description: 'Platform-specific device overview.',
-            inputSchema: { type: 'object', properties: {} },
-            handler: async () => ({ content: [] }),
-        };
-        const built = buildTools([mine]);
-        const info = built.filter((t) => t.name === 'acme_device_overview');
-        assert.equal(info.length, 1);
-        assert.equal(info[0].description, 'Platform-specific device overview.');
-        assert.ok(!('replaces' in info[0]));
-        assert.throws(
-            () => buildTools([{ ...mine, name: 'not_generic' }]),
-            /replaces no generic tool/,
-        );
+    it('keeps the list small', () => {
+        const size = JSON.stringify(tools.map(({ handler: _h, explain: _e, ...t }) => t)).length;
+        assert.ok(size < 20_000, `${size} characters`);
     });
 });
 

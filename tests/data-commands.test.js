@@ -10,7 +10,8 @@ import api from '../lib/api.js';
 import { applyProduct } from '../lib/product-apply.js';
 import { exportBucket } from '../lib/bucket-export.js';
 import { setJsonMode } from '../lib/output.js';
-import { registerToolCommands } from '../lib/commands/tools.js';
+import { registerDataCommands } from '../lib/commands/data.js';
+import { defineCliDocs } from '../lib/docs.js';
 import { registerApiCommand } from '../lib/commands/api.js';
 
 const jwt = `x.${Buffer.from(JSON.stringify({ usr: 'acme' })).toString('base64url')}.y`;
@@ -152,14 +153,14 @@ describe('bucket export', () => {
     });
 });
 
-describe('tool commands', () => {
+describe('data commands', () => {
     function program() {
         const p = new Command().name('acme').option('-u, --user <username>').exitOverride();
         // Groups written by hand (with commands: an empty one is a CLI's leaf).
         p.command('device').command('list');
         p.command('bucket').command('list');
         p.command('product').command('apply').description('the CLI’s own');
-        registerToolCommands(p);
+        registerDataCommands(p);
         registerApiCommand(p);
         return p;
     }
@@ -192,6 +193,12 @@ describe('tool commands', () => {
         const find = (...path) =>
             path.reduce((cmd, n) => cmd?.commands.find((c) => c.name() === n), p);
         assert.deepEqual(names(find('product', 'profile', 'api')), ['call']);
+        assert.equal(
+            find('product', 'profile', 'api', 'call').usage(),
+            '[options] <product> <resource>',
+        );
+        assert.deepEqual(names(find('doc')), ['list', 'get']);
+        assert.equal(find('doc').helpGroup(), 'Integration:');
         assert.deepEqual(names(find('device', 'resource')), ['list', 'call']);
         assert.deepEqual(names(find('storage', 'file')), ['list', 'upload', 'download', 'delete']);
     });
@@ -206,6 +213,57 @@ describe('tool commands', () => {
             { ts: 1, t: 20 },
             { ts: 2, t: 21 },
         ]);
+    });
+
+    // --json answers keep the shapes they had before the tools became types.
+    it('keep their --json shapes', async () => {
+        const json = (r) => JSON.parse(r.out).data;
+        const write = await run(['bucket', 'write', 'temps', '-s', 't=20', '--ts', '5', '-j']);
+        assert.deepEqual(write.calls[0].data, { t: 20 });
+        assert.equal(write.calls[0].url, '/v1/users/acme/buckets/temps/data');
+        assert.deepEqual(json(write), { bucket: 'temps', samples: 1 });
+
+        const sent = await run(['device', 'send', 'd1', '-s', 't=20', '-j'], () => ({ ok: 1 }));
+        assert.equal(sent.calls[0].method, 'post');
+        assert.equal(sent.calls[0].url, '/v3/users/acme/devices/d1/callback/data');
+        assert.deepEqual(json(sent), { device: 'd1', answer: { ok: 1 } });
+        const quiet = await run(['device', 'send', 'd1', '-s', 't=20', '-j'], () => '');
+        assert.deepEqual(json(quiet), { device: 'd1' });
+
+        const overview = await run(['device', 'overview', '--locations', '-j'], (m, url) =>
+            url.endsWith('/stats') ? { days: [] } : [{ device: 'd1' }],
+        );
+        assert.deepEqual(json(overview), { stats: { days: [] }, locations: [{ device: 'd1' }] });
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-core-up-'));
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'hello');
+        const up = await run(['storage', 'file', 'upload', 'web', path.join(dir, 'a.txt'), '-j']);
+        assert.deepEqual(json(up), { storage: 'web', files: ['a.txt'], bytes: 5 });
+
+        const del = await run(['storage', 'file', 'delete', 'web', '/a.txt', '-y', '-j']);
+        assert.deepEqual(json(del), { path: 'a.txt', deleted: true });
+
+        const plugin = await run(['plugin', 'call', 'nr', '/api/x', '-j'], () => '{"up":true}');
+        assert.match(plugin.calls[0].url, /\/plugins\/nr\/api\/x$/);
+        assert.deepEqual(json(plugin), { up: true });
+
+        const listed = await run(['storage', 'file', 'list', 'web'], () => []);
+        assert.equal(listed.out, 'No files.');
+    });
+
+    it('list and read the guides', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-core-docs-'));
+        fs.writeFileSync(path.join(dir, 'g.md'), '# Guide\n\nRead me.');
+        defineCliDocs([{ id: 'acme-guide', title: 'The guide', file: path.join(dir, 'g.md') }]);
+        try {
+            const listed = await run(['doc', 'list', '-j'], () => 404);
+            const docs = JSON.parse(listed.out).data;
+            assert.ok(docs.some((d) => d.doc === 'acme-guide' && d.title === 'The guide'));
+            const got = await run(['doc', 'get', 'acme-guide'], () => 404);
+            assert.match(got.out, /Read me\./);
+        } finally {
+            defineCliDocs([]);
+        }
     });
 
     it('call a device resource with -s as its input, and read one field', async () => {
@@ -286,7 +344,7 @@ describe('product apply --from', () => {
         const file = path.join(dir, 'meter.json');
         fs.writeFileSync(file, JSON.stringify({ product: 'meter', name: 'Meter' }));
         const p = new Command().name('acme').option('-u, --user <username>').exitOverride();
-        registerToolCommands(p);
+        registerDataCommands(p);
         const log = console.log;
         console.log = () => {};
         let calls;

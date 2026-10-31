@@ -118,7 +118,10 @@ describe('dashboard init', () => {
         assert.deepEqual(r.context, { device: 'gh_01' });
         assert.equal(r.devCommand, 'npm run dev');
         assert.match(r.notes[0], /points at a local copy \(file:/);
-        assert.match(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), /acme_dashboard_dev/);
+        assert.match(
+            fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'),
+            /acme_resource_call type "dashboard" action "dev"/,
+        );
     });
 
     it('renames the Angular project, which names its build folder', async () => {
