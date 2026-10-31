@@ -624,6 +624,34 @@ describe('core types', () => {
         );
     });
 
+    it('answer a refused action input with an example that works', async () => {
+        const publish = (body) =>
+            call('resource_call', { type: 'dashboard', action: 'publish', body });
+        await assert.rejects(
+            publish({ dashboard: 'plant', storage: 'app', dir: './dist' }),
+            (e) => {
+                assert.match(
+                    e.message,
+                    /^body of dashboard.publish has no "dashboard"; it takes: storage/,
+                );
+                assert.doesNotMatch(e.message, /pass the dashboard in ids/);
+                assert.match(
+                    e.message,
+                    /\nExample: acme_resource_call \{"type":"dashboard","action":"publish"/,
+                );
+                return true;
+            },
+        );
+        await assert.rejects(
+            publish({
+                storage: 'app',
+                files: { 'index.html': 'x' },
+                to: [{ type: 'dashboard', id: 'plant' }],
+            }),
+            /a dashboard of the dashboards collection is \{"dashboard": "plant"\}, not \{type, id\}\nExample: /,
+        );
+    });
+
     it('show what the describe hooks of the CLI add', async () => {
         const tools = buildTools({
             hooks: {
