@@ -28,7 +28,9 @@ gone, not aliased (see the second table below).
   and `create` carry their `ids`, ready to pass back. A call with an
   unknown argument is refused listing the ones the tool takes, and points
   a misplaced key to `ids`, `filter` or `body` (an id in an action's body
-  too: `{"device": …}` goes in `ids`).
+  too: `{"device": …}` goes in `ids`). An action that refuses its input
+  shows one of its examples.
+
 
 - The core's types and actions, served by the same tools: `bucket_data`
   (list reads, create writes), `storage_file` (`ids.file` is the path;
