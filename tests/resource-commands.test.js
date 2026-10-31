@@ -63,8 +63,13 @@ async function run(argv, data = {}) {
         return { data, status: 200, statusText: 'OK', headers: {}, config };
     };
     console.log = (...a) => out.push(a.join(' '));
-    // @ts-ignore -- captured for the test
-    process.stdout.write = (chunk) => out.push(String(chunk)) || true;
+    // Captured for the test. Only strings: the test runner's own reports
+    // to its parent go through stdout as buffers and must still get there.
+    // @ts-ignore
+    process.stdout.write = (chunk, ...rest) =>
+        typeof chunk === 'string'
+            ? out.push(chunk) > 0
+            : saved.write.call(process.stdout, chunk, ...rest);
     try {
         await program().parseAsync(['node', 'acme', ...argv]);
     } finally {

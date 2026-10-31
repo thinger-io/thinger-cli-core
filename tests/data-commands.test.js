@@ -170,8 +170,13 @@ describe('data commands', () => {
         const out = [];
         const saved = { log: console.log, write: process.stdout.write };
         console.log = (...a) => out.push(a.join(' '));
-        // @ts-ignore -- captured for the test
-        process.stdout.write = (chunk) => out.push(String(chunk)) || true;
+        // Captured for the test. Only strings: the test runner's own reports
+        // to its parent go through stdout as buffers and must still get there.
+        // @ts-ignore
+        process.stdout.write = (chunk, ...rest) =>
+            typeof chunk === 'string'
+                ? out.push(chunk) > 0
+                : saved.write.call(process.stdout, chunk, ...rest);
         let calls;
         try {
             calls = await withServer(route, () => program().parseAsync(['node', 'acme', ...argv]));
