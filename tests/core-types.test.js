@@ -552,6 +552,24 @@ describe('core types', () => {
         assert.deepEqual(result[DATA].result.files.sort(), ['css/a.css', 'index.html']);
     });
 
+    it('list the files of a folder by their whole path, as their ids', async () => {
+        let text;
+        await withServer(
+            () => [{ name: 'a.txt', path: 'a.txt', size: 5, type: 'file' }],
+            async () => {
+                text = textOf(
+                    await call('resource_list', {
+                        type: 'storage_file',
+                        ids: { storage: 'web' },
+                        filter: { path: 'dir/' },
+                    }),
+                );
+            },
+        );
+        assert.match(text, /"ids":\{"storage":"web","file":"dir\/a.txt"\}/);
+        assert.match(text, /"path":"dir\/a.txt"/);
+    });
+
     it('list device resources with their kind and their ids', async () => {
         let text;
         await withServer(

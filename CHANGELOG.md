@@ -187,7 +187,10 @@ gone, not aliased (see the second table below).
   escape each segment of a file path and refuse empty, `.` and `..`
   segments: `a#b` reached the file `a`, `..` the storage. The plugin
   `call` action also refuses `%2e%2e`.
+- Listing a storage folder answered each file's path relative to that
+  folder: it is now the whole path, the one its `ids.file` reads.
 - The help of `bucket read` and `device resource` printed some defaults
+
   twice ("(default: 10) (default: 10)", "(default: {})").
 
 ## [0.4.2] - 2026-10-17
