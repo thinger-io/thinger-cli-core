@@ -145,7 +145,7 @@ describe('generic resource commands', () => {
     });
 
     it('run actions, on items and on collections', async () => {
-        const stats = await run(['alarm-instance', 'stats', '-j'], { active: 2 });
+        const stats = await run(['alarm', 'instance', 'stats', '-j'], { active: 2 });
         assert.equal(stats.calls[0].method, 'get');
         assert.deepEqual(JSON.parse(stats.out).data, { active: 2 });
         const call = await run(['endpoint', 'call', 'e1', '-s', 'temp=20']);
@@ -272,11 +272,11 @@ describe('generic resource commands', () => {
     it('name ids after their noun and put the profile under product profile', () => {
         const p = program();
         const usage = (path) => find(p, path)?.usage();
-        assert.equal(usage(['asset-type', 'get']), '[options] <asset-type>');
+        assert.equal(usage(['asset', 'type', 'get']), '[options] <asset-type>');
         assert.equal(usage(['admin', 'oauth-client', 'get']), '[options] <oauth-client>');
         assert.equal(usage(['product', 'profile', 'api', 'get']), '[options] <product> <api>');
         assert.equal(usage(['bucket', 'export-file', 'delete']), '[options] <bucket> <file>');
-        assert.equal(usage(['alarm-rule', 'test']), '[options] <alarm-rule>');
+        assert.equal(usage(['alarm', 'rule', 'test']), '[options] <alarm-rule>');
         assert.equal(usage(['admin', 'host', 'get-settings']), '[options] <host>');
         assert.equal(usage(['plugin', 'uninstall']), '[options] <plugin>');
         assert.equal(usage(['sync', 'lock', 'list']), '[options] <sync>');

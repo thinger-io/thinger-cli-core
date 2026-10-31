@@ -22,7 +22,9 @@ form (see the table below); the old forms are gone, not aliased.
   for its 47 types. A child type nests under its parent's command and takes
   its ids first (`device bucket tag get <device> <bucket> <tag>`); the
   product profile categories go under `product profile` (`api`, `bucket`,
-  `property`, `autoprovision`, `flow`, `code`); server types go under
+  `property`, `autoprovision`, `flow`, `code`), alarms under `alarm`
+  (`alarm rule`, `alarm instance`) and assets under `asset` (`asset type`,
+  `asset group`); server types go under
   `admin` (`admin host restart <host>`). They run the handlers of the
   `resource_*` tools, hooks included (generated device credentials, token
   expiries such as "30d"). Bodies come from `--from <file|->` and
