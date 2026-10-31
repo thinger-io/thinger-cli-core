@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1] - 2026-10-31
+
+### Fixed
+
+- `host` action `update_settings` says what the server does: it merges the
+  body into the host's custom settings (keys left out stay, `null` removes
+  one). Its confirmation plan no longer claims it removes the keys left
+  out of the body.
+- The browser login on a server that does not know the CLI's OAuth client
+  (older than Thinger 7.5.0, or the client was removed) says so and offers
+  username and password or a token instead of failing.
+
 ## [0.5.0] - 2026-10-21
 
 One grammar for every command, noun first:

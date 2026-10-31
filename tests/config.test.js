@@ -192,6 +192,16 @@ describe('login', () => {
         assert.equal(getActiveProfile(), 'prod');
     });
 
+    it('says when the server does not know the OAuth client, and keeps the profile', async () => {
+        setActiveProfile('prod');
+        const login = () =>
+            authenticate({ method: 'oauth', server: 'old.example.com', clientId: 'cli' });
+        await withServer(401, () => assert.rejects(login, /does not know the OAuth client cli/));
+        setActiveProfile(null);
+        assert.equal(getProfile('old.example.com'), undefined);
+        assert.equal(getActiveProfile(), 'prod');
+    });
+
     it('saves the profile when the token is accepted', async () => {
         setActiveProfile('prod');
         await withServer(200, () =>
