@@ -10,6 +10,7 @@ import {
     actionName,
     cliDescription,
     cliWording,
+    describeForCli,
     commandPath,
     registerResourceCommands,
 } from '../lib/commands/resources.js';
@@ -360,6 +361,44 @@ describe('generic resource commands', () => {
         assert.deepEqual(
             args?.map((a) => a.description),
             ['ID of the device', 'ID of the device property'],
+        );
+    });
+
+    it('describe a type for a terminal: commands, ids, tables of fields', () => {
+        const group = new Command('rule');
+        for (const verb of ['list', 'get', 'describe']) group.command(verb).helpGroup('Records:');
+        const said = [
+            'type: alarm_rule',
+            'id: <rule>',
+            'operations: {"list":"acme_resource_list","get":"acme_resource_get"}',
+            'notes: Try it with the test_rule action. Confirm with the user first.',
+            `create: ${JSON.stringify({
+                schema: {
+                    properties: {
+                        rule: { type: 'string' },
+                        name: { type: 'string', maxLength: 255 },
+                        config: { type: 'object', properties: { severity: { type: 'number' } } },
+                    },
+                    required: ['rule'],
+                },
+                examples: { Minimal: { rule: 'r1' } },
+            })}`,
+            'actions: {"test_rule":{"run":"acme_resource_call","does":"Evaluate `body`. Confirm with the user first."}}',
+            'permissions: {"resource_type":"Alarm","actions":{"list":"ListAlarmRules","test_rule":"TestRule"}}',
+        ].join('\n');
+        const out = describeForCli(said, 'alarm_rule', group);
+        assert.match(out, /^id: <alarm-rule>$/m);
+        assert.match(out, /^commands: acme alarm rule list\|get\|describe$/m);
+        assert.match(out, /^notes: Try it with the test action$/m);
+        assert.match(out, /^create fields \(\* required\):$/m);
+        assert.match(out, /^ {2}rule\* +string$/m);
+        assert.match(out, /^ {2}name +string +max 255 chars$/m);
+        assert.match(out, /^ {2}config\.severity +number$/m);
+        assert.match(out, /^create example "Minimal":\n {2}\{\n {4}"rule": "r1"\n {2}\}$/m);
+        assert.match(out, /^ {2}acme alarm rule test: Evaluate the body$/m);
+        assert.match(
+            out,
+            /^permissions \(Alarm\):\n {2}list +ListAlarmRules\n {2}test +TestRule$/m,
         );
     });
 

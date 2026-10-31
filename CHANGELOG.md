@@ -39,7 +39,10 @@ form (see the table below); the old forms are gone, not aliased.
   commands, not tools: types by their command (`device property`, not
   `device_property`), `--index` for the next page, and `describe` lists
   the type's commands and actions where the MCP lists the tools that run
-  them.
+  them, its ids as the command takes them, the create, update and clone
+  bodies as tables of fields (nested ones by their dot path, one table per
+  alternative) with their examples pretty-printed, and the permission each
+  verb needs (`-j` keeps the MCP's text).
 - `set <parents…> <property> <value>` on every property type (device,
   product, plugin, asset type, asset group, project and account
   properties): the value, parsed as JSON, created when missing.
