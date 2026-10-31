@@ -582,6 +582,30 @@ describe('core types', () => {
         assert.match(storage, /^own_id: optional on create$/m);
     });
 
+    it('point an id given in an action body to ids', async () => {
+        const tools = buildTools({
+            actions: {
+                device: {
+                    probe: {
+                        description: 'Probe a device.',
+                        on: 'either',
+                        body: { type: 'object', properties: { x: { type: 'number' } } },
+                        run: () => 'ok',
+                    },
+                },
+            },
+        });
+        const run = (args) => tools.find((t) => t.name === 'acme_resource_call').handler(args);
+        await assert.rejects(
+            run({ type: 'device', action: 'probe', body: { device: 'd1', x: 1 } }),
+            /body of device.probe has no "device": pass the device in ids \(\{"device": "d1"\}\)/,
+        );
+        assert.match(
+            textOf(await run({ type: 'device', action: 'probe', ids: { device: 'd1' } })),
+            /ok/,
+        );
+    });
+
     it('show what the describe hooks of the CLI add', async () => {
         const tools = buildTools({
             hooks: {

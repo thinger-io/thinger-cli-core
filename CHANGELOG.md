@@ -27,7 +27,9 @@ gone, not aliased (see the second table below).
   `create` and `clone` need no mapping. Records answered by `list`, `get`
   and `create` carry their `ids`, ready to pass back. A call with an
   unknown argument is refused listing the ones the tool takes, and points
-  a misplaced key to `ids`, `filter` or `body`.
+  a misplaced key to `ids`, `filter` or `body` (an id in an action's body
+  too: `{"device": …}` goes in `ids`).
+
 - The core's types and actions, served by the same tools: `bucket_data`
   (list reads, create writes), `storage_file` (`ids.file` is the path;
   `body.local` uploads files and folders of this machine), `device_resource`
@@ -38,7 +40,8 @@ gone, not aliased (see the second table below).
 - `resource_describe`: without a type, the catalog with each type's ids and
   ready-to-send examples; with one, its ids, actions, the permission each
   verb needs, its schemas and examples (the tests check every example
-  against the tools). A `describe` resource hook adds to it.
+  against the tools). A `describe` resource hook adds to it, and hooks
+  get `ids` and `merge` (an update that patches) in their context.
 - Actions that change a lot at once answer a plan and run with
   `confirm: true`: `replace_all` of the product profile categories (a diff
   of what it adds, changes and removes), a host's `update_settings` (a diff
