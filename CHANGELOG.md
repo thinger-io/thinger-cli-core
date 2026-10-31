@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.2] - 2026-10-31
+
+### Added
+
+- The CLI says when a newer release of it is on npm: once a day it asks the
+  registry for the latest version of the identity's `npmPackage` (cached in
+  the cache folder) and, after a command run in a terminal, prints one line
+  with the update command. The MCP server tells the agent instead, in its
+  instructions when the cache already knows and otherwise with the first
+  answer of the session, so the agent can suggest the update to the user.
+  Off in CI, with JSON output, and with `<PREFIX>_NO_UPDATE_CHECK=1` or
+  `NO_UPDATE_NOTIFIER=1`.
+
 ## [0.5.1] - 2026-10-31
 
 ### Fixed

@@ -48,6 +48,12 @@ It holds everything that is not specific to a product:
   reads.
 - **OpenAPI** (`openapi`) — the server's own API description, cached per
   server and version, with a bundled copy as fallback.
+- **Update check** (`update-check`) — once a day, the latest release of the
+  CLI's npm package (`npmPackage` in the identity). After a command run in
+  a terminal, one line says when a newer one is out; the MCP server tells
+  the agent, in its instructions or with the first answer of the session,
+  so it can suggest the update. Off in CI and with `<PREFIX>_NO_UPDATE_CHECK=1`
+  (or `NO_UPDATE_NOTIFIER=1`).
 
 ## Identity
 
