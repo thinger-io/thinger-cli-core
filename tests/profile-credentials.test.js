@@ -18,6 +18,7 @@ import {
     setActiveProfile,
     updateProfile,
     withActiveProfile,
+    withExplicitUser,
     writeConfig,
 } from '../lib/config.js';
 import { profile as profileType } from '../lib/mcp/types/profile.js';
@@ -144,9 +145,22 @@ describe('profiles that take their credentials from another', () => {
         assert.throws(add('c', 'admin', ''), /--impersonate/);
     });
 
-    it('sign in the credentials profile on login, and stay as they are', async () => {
-        updateProfile('admin', { description: 'Admin of acme' });
+    it('cannot sign in themselves: their credentials profile does', async () => {
         setActiveProfile('monitoring');
+        try {
+            await assert.rejects(
+                authenticate({ method: 'token', server: ADMIN.server, username: 'x', token: 'T' }),
+                /Profile monitoring uses the session of profile admin: sign that one in\. Run `acme --profile admin login`/,
+            );
+        } finally {
+            setActiveProfile(null);
+        }
+        assert.equal(getProfile('admin').token, ADMIN.token);
+    });
+
+    it('keep working when their credentials profile signs in again, which keeps its description', async () => {
+        updateProfile('admin', { description: 'Admin of acme' });
+        setActiveProfile('admin');
         const saved = api.defaults.adapter;
         api.defaults.adapter = async (config) => ({
             data: {},
@@ -167,9 +181,12 @@ describe('profiles that take their credentials from another', () => {
             setActiveProfile(null);
         }
         assert.equal(getProfile('admin').token, 'T-new');
-        // A new session keeps what the profile is for.
         assert.equal(getProfile('admin').description, 'Admin of acme');
         assert.deepEqual(getProfile('monitoring'), MONITORING);
+        assert.equal(
+            withActiveProfile('monitoring', () => readConfig().token),
+            'T-new',
+        );
     });
 
     it('are listed to agents with what they are for, whom they act as and whose session they use', () => {
@@ -196,49 +213,127 @@ describe('profiles that take their credentials from another', () => {
 describe('a profile that acts as another account', () => {
     beforeEach(seed);
 
-    /** The requests that reach the server, as monitoring. */
-    async function attempt(method, url) {
+    /** Send a request as monitoring: what reached the server, and how. */
+    async function attempt(method, url, { data, user } = {}) {
         const saved = api.defaults.adapter;
         api.defaults.adapter = async (config) => ({
-            data: { reached: config.url },
+            data: { reached: config.url, auth: config.headers.Authorization ?? null },
             status: 200,
             statusText: '',
             headers: {},
             config,
         });
         try {
-            return await withActiveProfile('monitoring', () => api.request({ method, url }));
+            return await withActiveProfile('monitoring', () =>
+                withExplicitUser(user, () => api.request({ method, url, data })),
+            );
         } finally {
             api.defaults.adapter = saved;
         }
     }
 
-    it('reaches the paths of accounts, and what thinr needs outside them', async () => {
-        for (const [method, url] of [
+    const relay = (over = {}) => ({
+        proxy: 'tcp_iotmp_box_1',
+        config: {
+            protocol: 'tcp_iotmp',
+            target: {
+                type: 'address',
+                user: 'monitoring',
+                device: 'box',
+                address: 'localhost',
+                port: 22,
+            },
+            source: { port: 50001 },
+            ...over,
+        },
+    });
+
+    it('reaches its account, and the account asked for with -u or the MCP user', async () => {
+        for (const [method, url, opts] of [
             ['get', '/v1/users/monitoring/devices'],
-            ['get', '/v3/users/other/devices'], // -u
-            ['post', '/users/monitoring/plugins/p/run'],
+            ['post', '/v1/users/monitoring/devices'],
+            ['get', '/v1/users/monitoring'],
+            ['get', '/v3/users/other/devices', { user: 'other' }],
             ['get', '/v1/server/version'],
             ['get', '/v1/server/swagger.json'],
-            ['post', '/v1/proxies'],
-            ['delete', '/v1/proxies/abc'],
         ]) {
-            const res = await attempt(method, url);
+            const res = await attempt(method, url, opts);
             assert.equal(res.data.reached, url);
+            assert.equal(res.data.auth, `Bearer ${ADMIN.token}`);
         }
     });
 
-    it('does not act with the admin rights of its session elsewhere', async () => {
-        for (const [method, url] of [
-            ['get', '/v1/users'],
-            ['post', '/v1/users'],
-            ['get', '/v1/hosts'],
-            ['put', '/v1/server/settings'],
-            ['get', '/v1/proxies'],
+    it('renews its session without sending it', async () => {
+        for (const url of ['/oauth/token', '/oauth/device/authorize']) {
+            const res = await attempt('post', url);
+            assert.equal(res.data.auth, null);
+        }
+    });
+
+    it('opens relays to its devices, and closes only those it opened', async () => {
+        assert.equal(
+            (await attempt('post', '/v1/proxies', { data: relay() })).data.reached,
+            '/v1/proxies',
+        );
+        assert.equal(
+            (await attempt('delete', '/v1/proxies/tcp_iotmp_box_1')).data.reached,
+            '/v1/proxies/tcp_iotmp_box_1',
+        );
+    });
+
+    it('does not act with the admin rights of its session', async () => {
+        for (const [method, url, opts, why] of [
+            ['get', '/v1/users', {}, /is not on its account/],
+            ['post', '/v1/users', {}, /is not on its account/],
+            ['get', '/v1/hosts', {}, /is not on its account/],
+            ['put', '/v1/server/settings', {}, /is not on its account/],
+            ['get', '/v1/proxies', {}, /is not on its account/],
+            // Other accounts, unless asked for.
+            [
+                'delete',
+                '/v1/users/alice',
+                {},
+                /alice is not the account it acts as \(pass -u alice/,
+            ],
+            ['get', '/v1/users/alice/devices', {}, /alice is not the account/],
+            ['get', '/v1/users/monitoring/../alice/devices', {}, /alice is not the account/],
+            ['get', '/v1/users/al%69ce/devices', {}, /alice is not the account/],
+            // The account itself: its role, its password.
+            ['put', '/v1/users/monitoring', {}, /changes the account itself/],
+            ['delete', '/v1/users/monitoring/', {}, /changes the account itself/],
+            ['delete', '/v1/users/other', { user: 'other' }, /changes the account itself/],
+            // Plugins receive the request's headers.
+            ['post', '/users/monitoring/plugins/p/run', {}, /a plugin would receive the session/],
+            // Authorizing a device code would hand the admin session out.
+            ['post', '/oauth/device/verification', {}, /is not on its account/],
+            ['get', '/oauth/token', {}, /is not on its account/],
+            // Relays: only iotmp ones to its devices; closing only its own.
+            [
+                'post',
+                '/v1/proxies',
+                { data: relay({ protocol: 'tcp' }) },
+                /a relay may only reach a device/,
+            ],
+            [
+                'post',
+                '/v1/proxies',
+                {
+                    data: {
+                        ...relay(),
+                        config: {
+                            ...relay().config,
+                            target: { ...relay().config.target, user: 'alice' },
+                        },
+                    },
+                },
+                /a relay may only reach a device/,
+            ],
+            ['delete', '/v1/proxies/grafana', {}, /is not on its account/],
+            ['get', 'http://[bad', {}, /not a valid path/],
         ]) {
-            await assert.rejects(attempt(method, url), (e) => {
-                assert.equal(e.code, 'forbidden');
-                assert.match(e.message, /acts as monitoring with the session of profile admin/);
+            await assert.rejects(attempt(method, url, opts), (e) => {
+                assert.equal(e.code, 'forbidden', `${method} ${url}: ${e.message}`);
+                assert.match(e.message, why, `${method} ${url}`);
                 assert.match(e.message, /Use --profile admin for it/);
                 return true;
             });

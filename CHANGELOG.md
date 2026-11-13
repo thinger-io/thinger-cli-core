@@ -12,16 +12,21 @@
   the server with that profile's session, and API paths use its own
   account (`-u, --user` still overrides it). Renewals are saved in the
   profile that holds the credentials and serialized per credentials, so
-  the two never spend each other's refresh token. `login` from such a
-  profile signs in the one that holds the credentials, and without a
-  session there the error says to sign in that profile. One level only.
-  `logout` of one forgets it without revoking the borrowed session;
-  `logout` and `profile delete` of a profile whose credentials others use
-  are refused while those exist. Requests outside an account's paths
-  (users, hosts, domains, OAuth clients, server settings…) are refused on
-  such a profile, since they would run with the admin's rights; the server
-  version, its API description, OAuth and the relays to the account's
-  devices still go through.
+  the two never spend each other's refresh token. Such a profile is not
+  signed in itself (`login` from it says to sign in the profile that holds
+  the credentials), and without a session there the error says so. One
+  level only. `logout` of one forgets it without revoking the borrowed
+  session; `logout` and `profile delete` of a profile whose credentials
+  others use are refused while those exist.
+  The server sees the admin in every request of such a profile, so only
+  what its account could do itself goes through: the paths of that account
+  (or of the one asked for with `-u` or the MCP `user`), except changes to
+  the account record itself (role, password); the server version and API
+  description; `POST /oauth/token` and `/oauth/device/authorize`, sent
+  without the session; and thinr's IOTMP relays to the account's devices,
+  closing only those the process opened. Everything else (other accounts,
+  users, hosts, proxies, plugins, which receive the request's headers,
+  server settings…) is refused, pointing to the admin profile.
 - A description per profile, saying what it is for:
   `profile add … -d, --description <text>` and `profile update <name> -d`.
   `profile list` and the MCP's `profile` type show it, with `impersonate`
@@ -58,7 +63,13 @@
   write erase every profile.
 - `process.exit` while a session is being renewed (an error printed by
   another request of the same command) waits for the new tokens to be
-  saved, up to the renewal's timeout.
+  saved, up to the renewal's timeout, with the code of the first exit; no
+  new request starts meanwhile.
+- Deleting or logging out of the default profile no longer makes another
+  one the default silently (it could be an admin's): only the one left, if
+  just one is; otherwise commands say to pass `--profile` or choose one
+  with `profile use`. Refresh locks are kept fresh while held, so a long
+  renewal is not taken for a dead one.
 - Signals during a renewal no longer get lost: every SIGINT, SIGTERM and
   SIGHUP listener (spinners, prompts) is set aside meanwhile and the signal
   is raised again once the session is saved and its lock released. Lock

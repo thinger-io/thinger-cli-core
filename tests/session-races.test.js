@@ -12,9 +12,12 @@ import api from '../lib/api.js';
 import { refreshToken } from '../lib/auth.js';
 import {
     deleteConfig,
+    deleteProfile,
+    getActiveProfile,
     getProfile,
     readConfig,
     refreshLockPath,
+    requireConfig,
     setActiveProfile,
     setDefaultProfile,
     writeConfig,
@@ -101,6 +104,21 @@ describe('a renewal in flight', () => {
         assert.ok(srv.valid.has(getProfile('A').refresh_token), 'the renewed session was lost');
     });
 
+    it('exits with the first code asked for, and starts no request meanwhile', async () => {
+        srv.delayMs = 300;
+        const child = await inChild(`
+            const renewal = auth.refreshToken();
+            await new Promise((r) => setTimeout(r, 50));
+            process.exit(130);
+            const late = await api.get('/v1/users/ana/devices').then(() => 'sent', (e) => e.code);
+            console.log('late request: ' + late);
+            process.exit(0);
+        `);
+        assert.equal(child.code, 130, child.out);
+        assert.match(child.out, /late request: exiting/);
+        assert.ok(srv.valid.has(getProfile('A').refresh_token), 'the renewed session was lost');
+    });
+
     it('lets a signal act after the save, through the listeners the process had', async () => {
         srv.delayMs = 300;
         const lock = refreshLockPath('A');
@@ -178,6 +196,24 @@ describe('the profiles file', () => {
 
     it('gives distinct refresh locks to names that differ only in symbols', () => {
         assert.notEqual(refreshLockPath('host:8080'), refreshLockPath('host_8080'));
+    });
+});
+
+describe('deleting the default profile', () => {
+    beforeEach(seed);
+
+    it('picks no other one silently, and says how to choose', () => {
+        setActiveProfile('C');
+        writeConfig({ server: 'http://c.invalid', username: 'carol', token: 'T-c' });
+        setActiveProfile(null);
+        deleteProfile('A');
+        assert.equal(getActiveProfile(), null);
+        assert.throws(
+            () => requireConfig(),
+            /No default profile: pass --profile <name>, or choose one with `acme profile use <name>`/,
+        );
+        deleteProfile('C');
+        assert.equal(getActiveProfile(), 'B');
     });
 });
 
