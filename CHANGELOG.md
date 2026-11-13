@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- OAuth sessions no longer end when several processes of the CLI renew
+  them at once (agents running commands in parallel). The server spends a
+  refresh token on use, so the processes now take turns on a lock file
+  next to the config, and one that waited uses the session the other
+  saved. A refresh rejected because another process (an older CLI) spent
+  the token meanwhile also uses the session that process saved.
+- A process stopped (Ctrl+C, SIGTERM, SIGHUP) while renewing the session
+  saves the new tokens before it exits: stopping it in between left on
+  disk a refresh token the server had already spent.
+- A renewal that fails for a reason other than the session itself
+  (network, timeout, server error) is reported as such, with its code,
+  instead of "Session expired", and the saved session is kept. A rejected
+  one gives the server's reason.
+- A server that answers a renewal without a new refresh token keeps the
+  stored one instead of removing it.
+
 ## [0.5.2] - 2026-10-31
 
 ### Added
