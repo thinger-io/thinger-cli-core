@@ -388,6 +388,71 @@ describe('the login command without a terminal', () => {
         assert.equal(getProfile('acme'), undefined);
     });
 
+    /** A server that announces token revocation, at an address of another host. */
+    function revocationServer(status = 200) {
+        const seen = { revoked: [] };
+        srv.route = (req, res, body) => {
+            if (req.url === '/.well-known/openid-configuration') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(
+                    JSON.stringify({
+                        revocation_endpoint: 'https://elsewhere.example/oauth/revoke',
+                    }),
+                );
+                return true;
+            }
+            if (req.url === '/oauth/revoke') {
+                seen.revoked.push({
+                    type: req.headers['content-type'],
+                    form: Object.fromEntries(new URLSearchParams(body)),
+                });
+                res.writeHead(status, { 'Content-Type': 'application/json' });
+                res.end(status === 200 ? '' : JSON.stringify({ error: 'server_error' }));
+                return true;
+            }
+            return false;
+        };
+        return seen;
+    }
+
+    it('ends the browser session on logout when the server can revoke it', async () => {
+        const seen = revocationServer();
+        setActiveProfile('acme');
+        writeConfig({ server: srv.baseURL, username: 'ana', token: 'T', refresh_token: 'R' });
+        setActiveProfile(null);
+        const r = await cli('--profile', 'acme', 'logout');
+        assert.equal(r.code, 0, r.out);
+        // At the announced path, on the profile's own server.
+        assert.equal(seen.revoked.length, 1);
+        assert.equal(seen.revoked[0].type, 'application/x-www-form-urlencoded');
+        assert.equal(seen.revoked[0].form.token, 'R');
+        assert.equal(seen.revoked[0].form.token_type_hint, 'refresh_token');
+        assert.doesNotMatch(r.out, /keeps it valid/);
+        assert.equal(getProfile('acme'), undefined);
+    });
+
+    it('ends the browser session on logout --keep-token too', async () => {
+        const seen = revocationServer();
+        setActiveProfile('acme');
+        writeConfig({ server: srv.baseURL, username: 'ana', token: 'T', refresh_token: 'R' });
+        setActiveProfile(null);
+        const r = await cli('--profile', 'acme', 'logout', '--keep-token');
+        assert.equal(r.code, 0, r.out);
+        assert.equal(seen.revoked.length, 1);
+    });
+
+    it('forgets the profile when the server fails to end the session', async () => {
+        revocationServer(500);
+        setActiveProfile('acme');
+        writeConfig({ server: srv.baseURL, username: 'ana', token: 'T', refresh_token: 'R' });
+        setActiveProfile(null);
+        const r = await cli('--profile', 'acme', 'logout');
+        assert.equal(r.code, 0, r.out);
+        assert.match(r.out, /Could not end the browser session of acme on the server/);
+        assert.match(r.out, /the server keeps it valid/);
+        assert.equal(getProfile('acme'), undefined);
+    });
+
     it('asks for no password: without --oauth or a token it says how to sign in', async () => {
         const r = await cli('profile', 'add', 'acme', '--server', srv.baseURL);
         assert.notEqual(r.code, 0);

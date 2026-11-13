@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `logout` ends the browser session on the server: it revokes the profile's
+  refresh token (RFC 7009) when the server announces a
+  `revocation_endpoint` in `/.well-known/openid-configuration`, at that path
+  on the profile's own server. Also with `--keep-token`, which only keeps
+  the API token. Servers without it, or out of reach, keep the previous
+  behaviour: the session is forgotten here and the hint says it lapses on
+  its own.
+
 ## [0.5.4] - 2026-11-13
 
 ### Added
