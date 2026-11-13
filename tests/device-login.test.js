@@ -453,6 +453,51 @@ describe('the login command without a terminal', () => {
         assert.equal(getProfile('acme'), undefined);
     });
 
+    it('does not take a failing discovery for a server without revocation', async () => {
+        srv.route = (req, res) => {
+            if (req.url !== '/.well-known/openid-configuration') return false;
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end('{}');
+            return true;
+        };
+        setActiveProfile('acme');
+        writeConfig({ server: srv.baseURL, username: 'ana', token: 'T', refresh_token: 'R' });
+        setActiveProfile(null);
+        const r = await cli('--profile', 'acme', 'logout');
+        assert.equal(r.code, 0, r.out);
+        assert.match(r.out, /Could not end the browser session of acme on the server/);
+        assert.doesNotMatch(r.out, /cannot end a single session/);
+        assert.equal(getProfile('acme'), undefined);
+    });
+
+    it('does not follow a redirect with the token', async () => {
+        const seen = revocationServer();
+        const plain = srv.route;
+        let redirected = 0;
+        srv.route = (req, res, body) => {
+            if (req.url === '/oauth/revoke') {
+                res.writeHead(307, { Location: `${srv.baseURL}/elsewhere` });
+                res.end();
+                return true;
+            }
+            if (req.url === '/elsewhere') {
+                redirected++;
+                res.writeHead(200);
+                res.end();
+                return true;
+            }
+            return plain(req, res, body);
+        };
+        setActiveProfile('acme');
+        writeConfig({ server: srv.baseURL, username: 'ana', token: 'T', refresh_token: 'R' });
+        setActiveProfile(null);
+        const r = await cli('--profile', 'acme', 'logout');
+        assert.equal(r.code, 0, r.out);
+        assert.equal(redirected, 0);
+        assert.equal(seen.revoked.length, 0);
+        assert.match(r.out, /Could not end the browser session of acme on the server/);
+    });
+
     it('asks for no password: without --oauth or a token it says how to sign in', async () => {
         const r = await cli('profile', 'add', 'acme', '--server', srv.baseURL);
         assert.notEqual(r.code, 0);
