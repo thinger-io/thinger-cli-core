@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- Profiles that act as another account with the credentials of an admin
+  profile, so an agent picks the account with `--profile` and knows
+  nothing of the impersonation:
+  `profile add monitoring --credentials-from <profile> --impersonate monitoring`.
+  The profile stores only `credentials_from` and `impersonate`; it reaches
+  the server with that profile's session, and API paths use its own
+  account (`-u, --user` still overrides it). Renewals are saved in the
+  profile that holds the credentials and serialized per credentials, so
+  the two never spend each other's refresh token. `login` from such a
+  profile signs in the one that holds the credentials, and without a
+  session there the error says to sign in that profile. One level only.
+  `logout` of one forgets it without revoking the borrowed session;
+  `logout` and `profile delete` of a profile whose credentials others use
+  are refused while those exist.
+- A description per profile, saying what it is for:
+  `profile add … -d, --description <text>` and `profile update <name> -d`.
+  `profile list` and the MCP's `profile` type show it, with `impersonate`
+  and `credentials_from` for profiles that impersonate, and the `profile`
+  parameter of every tool asks agents to read them before using a profile
+  other than the default. A new login keeps the description.
+
 ### Fixed
 
 - OAuth sessions no longer end when several processes of the CLI renew

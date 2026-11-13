@@ -8,7 +8,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import api from '../lib/api.js';
 import { refreshToken } from '../lib/auth.js';
-import { deleteConfig, readConfig, writeConfig } from '../lib/config.js';
+import {
+    addImpersonatingProfile,
+    deleteConfig,
+    getProfile,
+    readConfig,
+    withActiveProfile,
+    writeConfig,
+} from '../lib/config.js';
 
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib');
 
@@ -85,7 +92,7 @@ beforeEach(() => {
 });
 
 /** Renew the session in another process sharing the same config. */
-function refreshInChild({ onSpawn } = {}) {
+function refreshInChild({ onSpawn, profile } = {}) {
     const code = `
         import { defineIdentity } from ${JSON.stringify(path.join(lib, 'identity.js'))};
         defineIdentity(${JSON.stringify(testIdentity)});
@@ -95,7 +102,11 @@ function refreshInChild({ onSpawn } = {}) {
     `;
     return new Promise((resolve) => {
         const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
-            env: { ...process.env, NODE_TEST_CONTEXT: '' },
+            env: {
+                ...process.env,
+                NODE_TEST_CONTEXT: '',
+                ...(profile && { ACME_PROFILE: profile }),
+            },
         });
         onSpawn?.(child);
         let out = '';
@@ -209,5 +220,60 @@ describe('session refresh', () => {
         });
         assert.deepEqual(res.data, { ok: true });
         assert.equal(oauth.refreshes, 0);
+    });
+
+    describe('of a profile and those that take its credentials', () => {
+        const host = () => new URL(baseURL).host;
+        beforeEach(() => {
+            addImpersonatingProfile('monitoring', {
+                credentialsFrom: host(),
+                impersonate: 'monitoring',
+            });
+        });
+
+        it('is one renewal in a process, saved where the credentials live', async () => {
+            oauth.delayMs = 100;
+            const tokens = await Promise.all([
+                withActiveProfile(host(), () => refreshToken()),
+                withActiveProfile('monitoring', () => refreshToken()),
+            ]);
+            assert.equal(oauth.refreshes, 1);
+            assert.equal(tokens[0], tokens[1]);
+            assert.equal(getProfile(host()).token, tokens[0]);
+            assert.ok(oauth.valid.has(getProfile(host()).refresh_token));
+            assert.deepEqual(getProfile('monitoring'), {
+                credentials_from: host(),
+                impersonate: 'monitoring',
+            });
+        });
+
+        it('takes turns across processes on the same lock', async () => {
+            oauth.delayMs = 300;
+            const results = await Promise.all([
+                refreshInChild({ profile: 'monitoring' }),
+                refreshInChild({ profile: host() }),
+                refreshInChild({ profile: 'monitoring' }),
+            ]);
+            assert.deepEqual(results, ['ok', 'ok', 'ok']);
+            assert.equal(oauth.refreshes, 1);
+            assert.ok(oauth.valid.has(getProfile(host()).refresh_token));
+        });
+
+        it('says to sign in the profile that holds them when the session is over', async () => {
+            oauth.valid.clear();
+            await assert.rejects(
+                withActiveProfile('monitoring', () => refreshToken()),
+                (e) => {
+                    assert.equal(e.code, 'unauthorized');
+                    assert.match(
+                        e.message,
+                        new RegExp(
+                            `in profile ${host().replace(/\./g, '\\.')}\\. Run \`acme --profile ${host().replace(/\./g, '\\.')} login\``,
+                        ),
+                    );
+                    return true;
+                },
+            );
+        });
     });
 });

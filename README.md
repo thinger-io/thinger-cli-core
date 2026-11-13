@@ -12,9 +12,13 @@ It holds everything that is not specific to a product:
   pasted token, OAuth device flow; interactive or fully non-interactive.
 - **Profiles** (`config`) — several servers per CLI, selected by `--profile`,
   `<PREFIX>_PROFILE` or the saved default, and scoped per call
-  (`withActiveProfile`) so concurrent MCP calls don't mix servers. In CI,
-  `<PREFIX>_SERVER` and `<PREFIX>_TOKEN` stand for a profile without any
-  file.
+  (`withActiveProfile`) so concurrent MCP calls don't mix servers. Each one
+  carries a description of what it is for, which agents read to pick one.
+  A profile can act as another account with the session of an admin
+  profile (`profile add <name> --credentials-from <profile> --impersonate
+<user>`): the tokens live and are renewed only in the profile that holds
+  them. In CI, `<PREFIX>_SERVER` and `<PREFIX>_TOKEN` stand for a profile
+  without any file.
 - **REST helpers** — `devices`, `property`, `resource`, `bucket`, `product`,
   `profile` (product profiles), `tokens`, `alarms`, `storage`, with every
   account path built in `paths`.
