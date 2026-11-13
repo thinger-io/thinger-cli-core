@@ -17,7 +17,11 @@
   session there the error says to sign in that profile. One level only.
   `logout` of one forgets it without revoking the borrowed session;
   `logout` and `profile delete` of a profile whose credentials others use
-  are refused while those exist.
+  are refused while those exist. Requests outside an account's paths
+  (users, hosts, domains, OAuth clients, server settings…) are refused on
+  such a profile, since they would run with the admin's rights; the server
+  version, its API description, OAuth and the relays to the account's
+  devices still go through.
 - A description per profile, saying what it is for:
   `profile add … -d, --description <text>` and `profile update <name> -d`.
   `profile list` and the MCP's `profile` type show it, with `impersonate`
@@ -42,6 +46,36 @@
   one gives the server's reason.
 - A server that answers a renewal without a new refresh token keeps the
   stored one instead of removing it.
+- A renewal reads and saves the profile that holds the session by name,
+  and saves only over the session it renewed: a change of the default
+  profile meanwhile no longer writes one profile's session into another,
+  and a login saved meanwhile wins over the renewal. A command, and each
+  MCP tool call, keeps the default profile it started with.
+- Every write of the profiles file takes a lock shared by the CLI's
+  processes, so one process no longer undoes another's writes (a renewed
+  session put back to its spent refresh token). A profiles file that is not
+  valid JSON is reported instead of read as empty, which made the next
+  write erase every profile.
+- `process.exit` while a session is being renewed (an error printed by
+  another request of the same command) waits for the new tokens to be
+  saved, up to the renewal's timeout.
+- Signals during a renewal no longer get lost: every SIGINT, SIGTERM and
+  SIGHUP listener (spinners, prompts) is set aside meanwhile and the signal
+  is raised again once the session is saved and its lock released. Lock
+  files are taken over atomically when stale and released only by their
+  owner.
+- A request whose body is a stream is not sent again after its session is
+  renewed (the stream is spent, and the retry hung): it fails with
+  `session_renewed`, asking to run the command again.
+- A password login gives each profile a CLI token of its own
+  (`<id>_<random>`) and revokes the one the profile had only after the new
+  one is saved: it used to revoke the shared token first, signing out the
+  other machines and profiles of the account, and leaving a revoked token
+  if the login failed half-way.
+- Impersonating profiles take only their link and description from their
+  own entry; everything else comes from the profile that holds the
+  credentials. Refresh lock names are distinct for profile names that
+  differ only in symbols.
 - `login` and `profile add` no longer touch the saved profile until the
   sign-in completes: the profile is built in memory and saved at the end.
   A login cancelled, failed or killed half-way (a device code never

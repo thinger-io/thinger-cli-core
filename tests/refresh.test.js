@@ -13,6 +13,7 @@ import {
     deleteConfig,
     getProfile,
     readConfig,
+    refreshLockPath,
     withActiveProfile,
     writeConfig,
 } from '../lib/config.js';
@@ -156,12 +157,7 @@ describe('session refresh', () => {
     });
 
     it('takes over the lock of a process that died', async () => {
-        const lock = path.join(
-            process.env.HOME,
-            '.config',
-            'acme-cli',
-            `refresh-${new URL(baseURL).host.replace(/[^\w.-]/g, '_')}.lock`,
-        );
+        const lock = refreshLockPath(new URL(baseURL).host);
         fs.writeFileSync(lock, '999999');
         const started = Date.now();
         await refreshToken();

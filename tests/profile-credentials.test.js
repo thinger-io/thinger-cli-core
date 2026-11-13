@@ -193,6 +193,59 @@ describe('profiles that take their credentials from another', () => {
     });
 });
 
+describe('a profile that acts as another account', () => {
+    beforeEach(seed);
+
+    /** The requests that reach the server, as monitoring. */
+    async function attempt(method, url) {
+        const saved = api.defaults.adapter;
+        api.defaults.adapter = async (config) => ({
+            data: { reached: config.url },
+            status: 200,
+            statusText: '',
+            headers: {},
+            config,
+        });
+        try {
+            return await withActiveProfile('monitoring', () => api.request({ method, url }));
+        } finally {
+            api.defaults.adapter = saved;
+        }
+    }
+
+    it('reaches the paths of accounts, and what thinr needs outside them', async () => {
+        for (const [method, url] of [
+            ['get', '/v1/users/monitoring/devices'],
+            ['get', '/v3/users/other/devices'], // -u
+            ['post', '/users/monitoring/plugins/p/run'],
+            ['get', '/v1/server/version'],
+            ['get', '/v1/server/swagger.json'],
+            ['post', '/v1/proxies'],
+            ['delete', '/v1/proxies/abc'],
+        ]) {
+            const res = await attempt(method, url);
+            assert.equal(res.data.reached, url);
+        }
+    });
+
+    it('does not act with the admin rights of its session elsewhere', async () => {
+        for (const [method, url] of [
+            ['get', '/v1/users'],
+            ['post', '/v1/users'],
+            ['get', '/v1/hosts'],
+            ['put', '/v1/server/settings'],
+            ['get', '/v1/proxies'],
+        ]) {
+            await assert.rejects(attempt(method, url), (e) => {
+                assert.equal(e.code, 'forbidden');
+                assert.match(e.message, /acts as monitoring with the session of profile admin/);
+                assert.match(e.message, /Use --profile admin for it/);
+                return true;
+            });
+        }
+    });
+});
+
 describe('profile commands', () => {
     beforeEach(seed);
 
