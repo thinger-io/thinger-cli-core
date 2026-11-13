@@ -213,8 +213,8 @@ describe('resource tools', () => {
     it('offer, per verb, exactly the types that support it', () => {
         const core = { list: ['bucket_data', 'storage_file', 'device_resource', 'doc', 'profile'] };
         Object.assign(core, {
-            get: ['storage_file', 'doc'],
-            create: ['bucket_data', 'storage_file'],
+            get: ['storage_file', 'doc', 'profile'],
+            create: ['bucket_data', 'storage_file', 'profile'],
             delete: ['storage_file'],
             clone: [],
         });

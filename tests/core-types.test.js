@@ -383,7 +383,8 @@ describe('errors that say what to do', () => {
             const where = `${type} ${verb}`;
             if (local?.filter && e.arguments.filter)
                 checkShape(e.arguments.filter, local.filter, where);
-            if (local?.schema && e.arguments.body)
+            // A record's schema is the body of create and update; an action has its own.
+            if (local?.schema && e.arguments.body && verb !== 'call')
                 checkShape(e.arguments.body, local.schema, where);
             if (action?.body && typeof action.run === 'function') {
                 // body.confirm answers the action's question: it is not its input.

@@ -8,8 +8,14 @@ It holds everything that is not specific to a product:
 
 - **API client** (`api`) — axios with the active profile's server and token on
   every request, refresh on 401, self-signed TLS for localhost.
-- **Auth** (`auth`) — username/password (mints a permanent API token),
-  pasted token, OAuth device flow; interactive or fully non-interactive.
+- **Auth** (`auth`, `device-login`) — username/password (mints a permanent
+  API token; asks for the authenticator code when the account has one),
+  pasted token (its account read from it), OAuth device flow. Without a
+  terminal the browser login comes in two steps: `login --oauth` (or
+  `profile add <name> --server <s> --oauth`) prints the link to approve,
+  and `--profile <name> login --wait` saves the session once approved;
+  agents do the same with the MCP `profile` actions `login` and `status`.
+  Passwords and tokens are never taken that way.
 - **Profiles** (`config`) — several servers per CLI, selected by `--profile`,
   `<PREFIX>_PROFILE` or the saved default, and scoped per call
   (`withActiveProfile`) so concurrent MCP calls don't mix servers. Each one

@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- The browser login without a terminal, in two steps: `login --oauth`
+  (implied `--no-wait` when there is no terminal) and `profile add <name>
+  --server <s> --oauth` print the link to approve (the code filled in) and
+  return; `--profile <name> login --wait [--timeout <s>]` saves the session
+  once approved. Nothing is saved before; the login under way is kept with
+  the profiles, checked by one process at a time, and the server is not
+  asked sooner than it allows (`slow_down` honoured). `login` takes `-j`.
+- MCP `profile` type: `get`, `create` (a profile acting as another account:
+  `credentials_from`, `impersonate`, `description`), `update` (the
+  description), and the actions `login` (starts the browser sign-in and
+  answers the link for the user) and `status` (saves the session once
+  approved). They take no password, token or username; a profile being
+  signed in for the first time is listed with its link; an existing profile
+  is never moved to another server.
+
+### Fixed
+
+- A password login on an account with multi-factor authentication asks for
+  the authenticator code (TOTP); an account with a security key only is sent
+  to the browser login; a server refusing password sign-in says why and
+  offers the browser login, instead of a raw 403.
+- A token login reads the account from the token: a token of another
+  account than `--username` is refused, `--username` can be left out, and a
+  403 is accepted only for a token that says it is of that account.
+- `logout` of a profile signed in through the browser says that the server
+  keeps that session until it goes unused (the server cannot end a single
+  session yet), instead of implying it was revoked.
+- A browser login that signs in a profile again revokes the API token a
+  password login had minted for it; the device flow uses the server's
+  interval and expiry, never overlaps its checks, and a network error does
+  not end it.
+
 ## [0.5.3] - 2026-11-13
 
 ### Added
