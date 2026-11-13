@@ -119,7 +119,7 @@ describe('a password login', () => {
                 seen.push(
                     `otp ${form.get('otp')} ${form.get('mfa_token')} ${form.get('password')}`,
                 );
-                return form.get('otp') === '123456'
+                return ['123456', 'ABCD2345'].includes(form.get('otp') ?? '')
                     ? json(res, 200, { access_token: 'session' })
                     : json(res, 401, { error: { message: 'invalid otp code' } });
             }
@@ -138,6 +138,13 @@ describe('a password login', () => {
         assert.match(out, /signed in/, out);
         assert.deepEqual(seen, ['password', 'otp 123456 MT secret', 'token']);
         assert.equal(getProfile('acme').token, 'perm');
+    });
+
+    it('takes a backup code as the server wrote it', async () => {
+        const seen = mfaServer(['totp']);
+        const out = await login('abcd2345');
+        assert.match(out, /signed in/, out);
+        assert.equal(seen[1], 'otp ABCD2345 MT secret');
     });
 
     it('says when the code is wrong, and saves nothing', async () => {

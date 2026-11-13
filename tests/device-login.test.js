@@ -8,6 +8,7 @@ import path from 'node:path';
 import {
     addImpersonatingProfile,
     deleteConfig,
+    deleteProfile,
     getActiveProfile,
     getPendingLogin,
     getProfile,
@@ -243,6 +244,75 @@ describe('a browser login without a terminal', () => {
         assert.equal(dev.codes, 0);
     });
 
+    it('leaves a profile made meanwhile as it is, and says why the login was not saved', async () => {
+        await startDeviceLogin('acme', { server: srv.baseURL, clientId: 'cli', create: true });
+        setActiveProfile('acme');
+        writeConfig({
+            server: 'http://b.invalid',
+            username: 'ana',
+            token: 'T-b',
+            token_id: 'tid_B',
+        });
+        setActiveProfile(null);
+        dev.state = 'approved';
+        const state = await checkDeviceLogin('acme');
+        assert.equal(state.status, 'failed');
+        assert.match(state.error, /was made meanwhile/);
+        assert.equal(getProfile('acme').server, 'http://b.invalid');
+        assert.deepEqual(dev.deleted, []);
+        // Asked again, the same answer, not "expired".
+        assert.equal((await checkDeviceLogin('acme')).status, 'failed');
+    });
+
+    it('does not sign a profile in again as another account', async () => {
+        setActiveProfile('acme');
+        writeConfig({ server: srv.baseURL, username: 'ana', token: 'T-ana' });
+        setActiveProfile(null);
+        await startDeviceLogin('acme', { clientId: 'cli' });
+        dev.state = 'approved';
+        dev.user = 'eve';
+        const state = await checkDeviceLogin('acme');
+        assert.equal(state.status, 'failed');
+        assert.match(state.error, /approved as eve, but profile acme is of ana/);
+        assert.equal(getProfile('acme').token, 'T-ana');
+    });
+
+    it('is forgotten when its profile is deleted, so an approval does not bring it back', async () => {
+        await startDeviceLogin('acme', { server: srv.baseURL, clientId: 'cli' });
+        deleteProfile('acme');
+        dev.state = 'approved';
+        assert.equal((await checkDeviceLogin('acme')).status, 'none');
+        assert.equal(getProfile('acme'), undefined);
+        assert.equal(dev.exchanged, 0);
+    });
+
+    it('started again while a check is in flight, keeps the new code', async () => {
+        await startDeviceLogin('acme', { server: srv.baseURL, clientId: 'cli' });
+        const slow = srv.route;
+        let release;
+        const held = new Promise((r) => (release = r));
+        srv.route = (req, res, body) => {
+            if (req.url === '/oauth/token' && body.includes('DC-1')) {
+                // The check of code 1 waits until code 2 is asked for, then is refused.
+                held.then(() => {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'access_denied' }));
+                });
+                return true;
+            }
+            return slow(req, res, body);
+        };
+        const check = checkDeviceLogin('acme');
+        const restart = startDeviceLogin('acme', { server: srv.baseURL, clientId: 'cli' });
+        await new Promise((r) => setTimeout(r, 100));
+        release();
+        await check;
+        const second = await restart;
+        assert.equal(second.code, 'CODE-2');
+        assert.equal(getPendingLogin('acme').device_code, 'DC-2');
+        assert.equal(getPendingLogin('acme').status, 'pending');
+    });
+
     it('waits until approved, or gives up after the time given', async () => {
         await startDeviceLogin('acme', { server: srv.baseURL, clientId: 'cli' });
         assert.equal((await waitDeviceLogin('acme', { timeoutMs: 0 })).status, 'pending');
@@ -279,7 +349,8 @@ describe('the login command without a terminal', () => {
         assert.equal(getProfile('acme'), undefined);
 
         const early = await cli('--profile', 'acme', 'login', '--wait', '--timeout', '0', '-j');
-        assert.notEqual(early.code, 0);
+        // 2: not approved yet, run it again.
+        assert.equal(early.code, 2, early.out);
         assert.match(early.out, /"code": "pending"/);
 
         dev.state = 'approved';
@@ -289,6 +360,13 @@ describe('the login command without a terminal', () => {
         assert.match(done.out, /Signed in as ana \(profile acme\)/);
         assert.equal(getProfile('acme').description, 'Admin of acme');
         assert.equal(getActiveProfile(), 'home');
+    });
+
+    it('asks for the server when there is no profile to sign in', async () => {
+        deleteConfig();
+        const r = await cli('login', '--oauth', '--client-id', 'cli');
+        assert.equal(r.code, 1, r.out);
+        assert.match(r.out, /Pass the server to sign in to \(--server <server>\)/);
     });
 
     it('says how to start one when there is none to wait for', async () => {
@@ -443,6 +521,22 @@ describe('the profile type of the MCP server', () => {
 });
 
 describe('setting the default', () => {
+    it('is not taken by a profile added while there is none on purpose', async () => {
+        for (const name of ['a', 'b']) {
+            setActiveProfile(name);
+            writeConfig({ server: srv.baseURL, username: name, token: `T-${name}` });
+        }
+        setActiveProfile(null);
+        deleteProfile('home');
+        assert.equal(getActiveProfile(), null);
+        addImpersonatingProfile('mon', { credentialsFrom: 'a', impersonate: 'zed' });
+        assert.equal(getActiveProfile(), null);
+        await startDeviceLogin('c', { server: srv.baseURL, clientId: 'cli' });
+        dev.state = 'approved';
+        assert.equal((await checkDeviceLogin('c')).status, 'approved');
+        assert.equal(getActiveProfile(), null);
+    });
+
     it('is untouched by a pending login', async () => {
         setDefaultProfile('home');
         await startDeviceLogin('acme', { server: srv.baseURL, clientId: 'cli' });

@@ -8,9 +8,13 @@
   (implied `--no-wait` when there is no terminal) and `profile add <name>
   --server <s> --oauth` print the link to approve (the code filled in) and
   return; `--profile <name> login --wait [--timeout <s>]` saves the session
-  once approved. Nothing is saved before; the login under way is kept with
-  the profiles, checked by one process at a time, and the server is not
-  asked sooner than it allows (`slow_down` honoured). `login` takes `-j`.
+  once approved (exit code 2 while not approved yet). Nothing is saved
+  before; the login under way is kept with the profiles, started and
+  checked by one process at a time, and the server is not asked sooner than
+  it allows (`slow_down` honoured). It is not saved over a profile made
+  meanwhile, nor as another account than the profile's; deleting the
+  profile (or logging out) forgets it. `login` takes `-j`, which only
+  starts a browser login.
 - MCP `profile` type: `get`, `create` (a profile acting as another account:
   `credentials_from`, `impersonate`, `description`), `update` (the
   description), and the actions `login` (starts the browser sign-in and
@@ -21,8 +25,11 @@
 
 ### Fixed
 
+- A new profile (added, signed in, or made by an agent) becomes the default
+  only when it is the only one: with several and none chosen, choosing is
+  left to the user.
 - A password login on an account with multi-factor authentication asks for
-  the authenticator code (TOTP); an account with a security key only is sent
+  the authenticator code (TOTP) or a backup code; an account with a security key only is sent
   to the browser login; a server refusing password sign-in says why and
   offers the browser login, instead of a raw 403.
 - A token login reads the account from the token: a token of another
