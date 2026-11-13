@@ -215,4 +215,29 @@ describe('login', () => {
         setActiveProfile(null);
         assert.equal(getProfile('prod').token, 'T-new');
     });
+
+    it('leaves the saved profile untouched until signed in', async () => {
+        setActiveProfile('prod');
+        const seen = [];
+        const saved = api.defaults.adapter;
+        api.defaults.adapter = async (config) => {
+            // What other processes read from disk while the login runs.
+            seen.push({ ...getProfile('prod') });
+            return { data: {}, status: 200, statusText: '', headers: {}, config };
+        };
+        try {
+            await authenticate({
+                method: 'token',
+                server: 'prod.example.com',
+                username: 'alice',
+                token: 'T-new',
+            });
+        } finally {
+            api.defaults.adapter = saved;
+        }
+        assert.ok(seen.length > 0);
+        for (const profile of seen) assert.equal(profile.token, 'T-prod');
+        setActiveProfile(null);
+        assert.equal(getProfile('prod').token, 'T-new');
+    });
 });

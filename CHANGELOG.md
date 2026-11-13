@@ -19,6 +19,11 @@
   one gives the server's reason.
 - A server that answers a renewal without a new refresh token keeps the
   stored one instead of removing it.
+- `login` and `profile add` no longer touch the saved profile until the
+  sign-in completes: the profile is built in memory and saved at the end.
+  A login cancelled, failed or killed half-way (a device code never
+  approved, a closed terminal) used to leave the profile with only its
+  server, signing out every process that used it.
 
 ## [0.5.2] - 2026-10-31
 
